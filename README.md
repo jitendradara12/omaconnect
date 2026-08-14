@@ -26,7 +26,7 @@ omarchy plugin add https://github.com/jitendradara12/omaconnect.git --enable --y
 Add to `~/.config/omarchy/shortcuts.lua`:
 
 ```lua
-o.bind("SUPER + Shift + C", "Toggle OmaConnect", "omarchy-shell shell toggle omaconnect")
+o.bind("SUPER + SHIFT + C", "Toggle OmaConnect", "omarchy-shell shell toggle omaconnect")
 ```
 
 ### Panel Bindings
