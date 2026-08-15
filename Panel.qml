@@ -86,6 +86,13 @@ KeyboardPanel {
         if (!service) return
         if (unpairConfirmingId && unpairConfirmingId !== id) cancelUnpairConfirm(unpairConfirmingId)
         service.selectDevice(id)
+        var list = service.devices || []
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].id === String(id)) {
+                selectedIndex = i
+                break
+            }
+        }
     }
 
     function confirmUnpair(id) {
