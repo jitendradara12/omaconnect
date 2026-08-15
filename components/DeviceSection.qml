@@ -133,13 +133,11 @@ Column {
             currentFill: Style.selectedFillFor(root.foreground, Color.accent)
             MouseArea {
                 anchors.fill: parent
-                hoverEnabled: true
-                onEntered: {
-                    panel.cursorActive = true
+                onClicked: {
+                    panel.focusSection = "devices"
                     panel.selectedIndex = index
                     panel.selectDevice(modelData.id)
                 }
-                onClicked: panel.selectDevice(modelData.id)
             }
             Item {
                 id: row
