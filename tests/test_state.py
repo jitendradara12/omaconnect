@@ -872,7 +872,38 @@ class StateTests(unittest.TestCase):
     self.assertIn("filePickerProcess", controller_source)
     self.assertIn("getPickerScriptPath", controller_source)
     picker_sh = (ROOT / "scripts" / "pick_file.sh").read_text()
-    self.assertIn("omarchy-menu-file", picker_sh)
+    self.assertIn("omarchy-menu-select", picker_sh)
+
+  def test_file_picker_bounds_option_list_and_skips_missing_roots(self):
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        (home / "Downloads").mkdir()
+        for index in range(400):
+            entry = home / "Downloads" / f"{'n' * 200}-{index:04d}.pdf"
+            entry.write_text("x")
+            os.utime(entry, (index, index))
+
+        # Shadow the real menu so the picker's option list lands on stdout.
+        stub_dir = home / ".local" / "bin"
+        stub_dir.mkdir(parents=True)
+        stub = stub_dir / "omarchy-menu-select"
+        stub.write_text("#!/usr/bin/env bash\ncat\n")
+        stub.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts" / "pick_file.sh")],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "HOME": str(home), "OMARCHY_PATH": ""},
+        )
+
+    # Documents/Pictures/Videos are absent, which must not abort the picker.
+    self.assertEqual(result.returncode, 0)
+    options = result.stdout.splitlines()
+    self.assertTrue(options)
+    self.assertLess(len(options), 400)
+    self.assertLess(len(result.stdout.encode()), 128 * 1024)
+    self.assertTrue(options[0].endswith("-0399.pdf"))
 
   def test_remote_commands_unsupported_device(self):
     line = "DEVICE\tdev-unsupp\tPhone\tphone\ttrue\ttrue\t80\tfalse\tkdeconnect_ping,kdeconnect_share"

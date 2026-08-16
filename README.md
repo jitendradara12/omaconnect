@@ -14,7 +14,7 @@ omarchy plugin add https://github.com/jitendradara12/omaconnect.git --enable --y
 
 - **Device & Network Monitoring**: Real-time battery level, charging indicators, LTE/5G cellular status, reachability, and pairing state.
 - **SMS & Messaging**: Direct `kdeconnect-sms` integration and inline ping/text composer.
-- **Native Omarchy File Picker**: Send files to paired devices instantly via lightweight `omarchy-menu-file`.
+- **Native Omarchy File Picker**: Send files to paired devices instantly via lightweight `omarchy-menu-select`, listing the most recently modified matches under `~/Downloads`, `~/Documents`, `~/Pictures`, and `~/Videos`.
 - **Quick Device Actions**: Ring device, sync clipboard, send files, ping, and share text or URLs.
 - **Remote Commands**: Discover and execute custom remote commands configured on target devices.
 - **Pairing Management**: Inline pair and unpair requests with safety confirmation steps.
@@ -44,7 +44,7 @@ o.bind("SUPER + SHIFT + C", "Toggle OmaConnect", "omarchy-shell shell toggle oma
 
 ## Dependencies
 
-Requires `kdeconnect`, `glib2`, `dbus`, and Omarchy's `omarchy-menu-file` command for file sharing:
+Requires `kdeconnect`, `glib2`, `dbus`, and Omarchy's `omarchy-menu-select` command for file sharing:
 
 ```bash
 sudo pacman -S kdeconnect glib2 dbus
