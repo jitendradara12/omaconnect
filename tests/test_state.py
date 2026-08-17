@@ -849,6 +849,33 @@ class StateTests(unittest.TestCase):
     self.assertIn("sanitize_field()", discovery_source)
     self.assertIn("field=${field//$'\\t'/ }", discovery_source)
 
+  def test_discovery_accepts_typed_empty_device_array(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text(
+          "#!/usr/bin/env bash\n"
+          "if [[ \"$*\" == *NameHasOwner* ]]; then\n"
+          "  printf '(true,)\\n'\n"
+          "else\n"
+          "  printf '(@as [],)\\n'\n"
+          "fi\n"
+      )
+      gdbus.chmod(0o755)
+      kdeconnect_cli = stub_dir / "kdeconnect-cli"
+      kdeconnect_cli.write_text("#!/usr/bin/env bash\nexit 0\n")
+      kdeconnect_cli.chmod(0o755)
+
+      result = subprocess.run(
+          ["bash", str(ROOT / "scripts" / "discover_devices.sh")],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+
+      self.assertEqual(result.returncode, 0, result)
+      self.assertEqual(result.stdout, "")
+
   def test_sms_launcher_reports_missing_command(self):
     sms_source = (ROOT / "scripts" / "open_sms.sh").read_text()
     self.assertIn("command -v kdeconnect-sms", sms_source)

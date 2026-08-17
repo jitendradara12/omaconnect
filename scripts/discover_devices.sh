@@ -61,7 +61,7 @@ ids=$(gdbus call --session --dest org.kde.kdeconnect --object-path "$base" \
     --method org.kde.kdeconnect.daemon.devices false false) || exit 69
 entries=$(printf '%s' "$ids" | sed -E 's/.*\[//; s/\].*//' | tr ',' '\n' \
     | sed -nE "s/^[[:space:]]*['\"]?([^'\"]+)['\"]?[[:space:]]*$/\1/p")
-[[ -n "$entries" || "$ids" =~ \(\[[[:space:]]*\],[[:space:]]*\) ]] || exit 70
+[[ -n "$entries" || "$ids" =~ ^\((@as[[:space:]]+)?\[[[:space:]]*\],[[:space:]]*\)$ ]] || exit 70
 
 is_address_reachable() {
     local addr=$1
