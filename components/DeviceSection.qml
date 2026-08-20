@@ -99,7 +99,7 @@ Column {
                     spacing: Style.space(6)
 
                     Text {
-                        text: root.service ? ((root.showBattery && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0) ? root.service.deviceBatteryIcon(root.device) : root.service.deviceNetworkIcon(root.device)) : ""
+                        text: root.service ? ((root.showBattery && root.device && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0) ? root.service.deviceBatteryIcon(root.device) : root.service.deviceNetworkIcon(root.device)) : ""
                         color: (root.showBattery && root.device && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
                             ? Color.urgent
                             : ((root.device && (root.device.isCharging || root.device.charging)) ? Color.accent : root.foreground)

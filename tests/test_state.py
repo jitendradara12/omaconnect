@@ -101,7 +101,7 @@ def format_network_status(device):
 def device_type_icon(dev_type):
     t = str(dev_type or "").lower().strip()
     return {
-        "phone": "󰏲",
+        "phone": "󰄜",
         "tablet": "󰓹",
         "laptop": "󰌢",
         "desktop": "󰍹",
@@ -149,7 +149,7 @@ def compute_available_actions(device, settings=None):
         res.append("file")
     if caps.get("sms") and s.get("showActionSms", True):
         res.append("sms")
-    if caps.get("ping") and s.get("showActionPing", True):
+    if caps.get("ping") and s.get("showActionPing", False):
         res.append("ping")
     if caps.get("text") and s.get("showActionText", True):
         res.append("text")
@@ -1381,7 +1381,7 @@ class StateTests(unittest.TestCase):
     self.assertIn("root.cancelUnpairConfirm", panel_source)
 
   def test_device_type_icon_mapping_and_defaults(self):
-    self.assertEqual(device_type_icon("phone"), "󰏲")
+    self.assertEqual(device_type_icon("phone"), "󰄜")
     self.assertEqual(device_type_icon("tablet"), "󰓹")
     self.assertEqual(device_type_icon("laptop"), "󰌢")
     self.assertEqual(device_type_icon("desktop"), "󰍹")
@@ -1399,24 +1399,28 @@ class StateTests(unittest.TestCase):
     full_line = "DEVICE\tdev-full\tFull Phone\tphone\ttrue\ttrue\t100\ttrue\tkdeconnect_battery,kdeconnect_ping,kdeconnect_share,kdeconnect_findmyphone,kdeconnect_clipboard,kdeconnect_sms\t5G\t4"
     dev = parse_device(full_line)
 
-    # All enabled by default
-    all_acts = compute_available_actions(dev, {})
+    # Ping is disabled by default
+    default_acts = compute_available_actions(dev, {})
+    self.assertEqual(default_acts, ["ring", "clipboard", "file", "sms", "text"])
+
+    # Explicitly enable ping
+    all_acts = compute_available_actions(dev, {"showActionPing": True})
     self.assertEqual(all_acts, ["ring", "clipboard", "file", "sms", "ping", "text"])
 
-    # Disable SMS and ping
-    filtered_acts = compute_available_actions(dev, {"showActionSms": False, "showActionPing": False})
-    self.assertEqual(filtered_acts, ["ring", "clipboard", "file", "text"])
+    # Disable SMS with ping enabled
+    filtered_acts = compute_available_actions(dev, {"showActionSms": False, "showActionPing": True})
+    self.assertEqual(filtered_acts, ["ring", "clipboard", "file", "ping", "text"])
 
     # Disable ring and clipboard
     filtered_acts2 = compute_available_actions(dev, {"showActionRing": False, "showActionClipboard": False})
-    self.assertEqual(filtered_acts2, ["file", "sms", "ping", "text"])
+    self.assertEqual(filtered_acts2, ["file", "sms", "text"])
 
     panel_source = (ROOT / "Panel.qml").read_text()
     self.assertIn("root.getSetting(\"showActionRing\", true)", panel_source)
     self.assertIn("root.getSetting(\"showActionClipboard\", true)", panel_source)
     self.assertIn("root.getSetting(\"showActionFile\", true)", panel_source)
     self.assertIn("root.getSetting(\"showActionSms\", true)", panel_source)
-    self.assertIn("root.getSetting(\"showActionPing\", true)", panel_source)
+    self.assertIn("root.getSetting(\"showActionPing\", false)", panel_source)
     self.assertIn("root.getSetting(\"showActionText\", true)", panel_source)
 
   def test_settings_telemetry_filtering(self):
@@ -1469,6 +1473,7 @@ class StateTests(unittest.TestCase):
     self.assertIn("showActionFile", settings)
     self.assertIn("showActionSms", settings)
     self.assertIn("showActionPing", settings)
+    self.assertFalse(settings["showActionPing"]["default"])
     self.assertIn("showActionText", settings)
     self.assertIn("defaultPingMessage", settings)
 
@@ -1478,8 +1483,9 @@ class StateTests(unittest.TestCase):
     self.assertIn("tooltipText: \"Runs: sudo ufw", device_section)
 
     action_toolbar = (ROOT / "components" / "ActionToolbar.qml").read_text()
-    self.assertIn("actionTooltip", action_toolbar)
-    self.assertIn("tooltipText: actionTooltip", action_toolbar)
+    self.assertIn("PanelToolTip", action_toolbar)
+    self.assertIn("text: actionSurface.actionTooltip", action_toolbar)
+    self.assertIn("id: actionMouseArea", action_toolbar)
 
 
 if __name__ == "__main__":

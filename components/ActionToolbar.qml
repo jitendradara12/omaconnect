@@ -31,6 +31,7 @@ Column {
         Repeater {
             model: panel ? panel.availableActions : []
             delegate: CursorSurface {
+                id: actionSurface
                 required property string modelData
                 required property int index
                 readonly property string actionName: {
@@ -61,7 +62,12 @@ Column {
                     return ""
                 }
 
-                tooltipText: actionTooltip
+                PanelToolTip {
+                    visible: actionMouseArea.containsMouse
+                    text: actionSurface.actionTooltip
+                    fontFamily: root.fontFamily
+                }
+
                 implicitWidth: (actionIcon !== "" ? Style.space(16) : 0) + actionBtnText.implicitWidth + Style.space(16)
                 implicitHeight: Math.max(actionBtnText.implicitHeight, Style.space(16)) + Style.space(8)
                 hasCursor: panel.cursorActive && panel.focusSection === "actions" && panel.actionSelectedIndex === index
@@ -72,6 +78,7 @@ Column {
                 enabled: !root.service || (root.service.actionState !== "running" && !root.service.fileBusy)
 
                 MouseArea {
+                    id: actionMouseArea
                     anchors.fill: parent
                     hoverEnabled: true
                     onEntered: {
@@ -87,8 +94,8 @@ Column {
                     spacing: Style.space(4)
 
                     Text {
-                        visible: parent.parent.actionIcon !== ""
-                        text: parent.parent.actionIcon
+                        visible: actionSurface.actionIcon !== ""
+                        text: actionSurface.actionIcon
                         color: root.foreground
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption
@@ -97,7 +104,7 @@ Column {
 
                     Text {
                         id: actionBtnText
-                        text: parent.parent.actionName
+                        text: actionSurface.actionName
                         color: root.foreground
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.bodySmall

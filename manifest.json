@@ -33,7 +33,7 @@
     "showActionClipboard": { "type": "boolean", "default": true, "description": "Include Clipboard sync action" },
     "showActionFile": { "type": "boolean", "default": true, "description": "Include File transfer action" },
     "showActionSms": { "type": "boolean", "default": true, "description": "Include SMS conversation action" },
-    "showActionPing": { "type": "boolean", "default": true, "description": "Include Ping action" },
+    "showActionPing": { "type": "boolean", "default": false, "description": "Include Ping action" },
     "showActionText": { "type": "boolean", "default": true, "description": "Include Text and link sharing action" },
     "defaultPingMessage": { "type": "string", "default": "", "description": "Default draft message for ping" }
   }

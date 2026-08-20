@@ -37,7 +37,7 @@ You can customize OmaConnect via your Omarchy bar widget settings. All options d
 | `showActionClipboard` | boolean | `true` | Include the Clipboard sync button |
 | `showActionFile` | boolean | `true` | Include the File send button |
 | `showActionSms` | boolean | `true` | Include the SMS launcher button |
-| `showActionPing` | boolean | `true` | Include the Ping button |
+| `showActionPing` | boolean | `false` | Include the Ping button |
 | `showActionText` | boolean | `true` | Include the Text and link sharing button |
 | `defaultPingMessage` | string | `""` | Default draft text for ping composer |
 

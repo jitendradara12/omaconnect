@@ -189,7 +189,7 @@ Item {
 
     function deviceTypeIcon(type) {
         var t = String(type || "").toLowerCase().trim()
-        if (t === "phone") return "󰏲"
+        if (t === "phone") return "󰄜"
         if (t === "tablet") return "󰓹"
         if (t === "laptop") return "󰌢"
         if (t === "desktop") return "󰍹"

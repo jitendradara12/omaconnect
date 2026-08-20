@@ -65,7 +65,7 @@ KeyboardPanel {
         if (caps.clipboard && root.getSetting("showActionClipboard", true)) res.push("clipboard")
         if (caps.file && root.getSetting("showActionFile", true)) res.push("file")
         if (caps.sms && root.getSetting("showActionSms", true)) res.push("sms")
-        if (caps.ping && root.getSetting("showActionPing", true)) res.push("ping")
+        if (caps.ping && root.getSetting("showActionPing", false)) res.push("ping")
         if (caps.text && root.getSetting("showActionText", true)) res.push("text")
         return res
     }
