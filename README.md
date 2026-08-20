@@ -2,7 +2,7 @@
 
 Control your phone and other devices from the Omarchy bar with KDE Connect.
 
-KDE Connect is the cross-device layer underneath: it pairs your Linux desktop with Android, iPhone, Windows, and macOS devices for everyday features such as clipboard sharing, files, messages, and notifications. OmaConnect puts the most useful controls in one quick bar panel instead of making you open a separate app. Available features depend on what each device supports.
+KDE Connect is the cross-device layer underneath. It pairs your Linux desktop with Android, iPhone, Windows, and macOS devices for clipboard sharing, file transfer, messaging, and notifications. OmaConnect puts the most useful controls in one quick bar panel instead of making you open a separate app.
 
 ![OmaConnect screenshot](preview.png)
 
@@ -12,16 +12,42 @@ KDE Connect is the cross-device layer underneath: it pairs your Linux desktop wi
 omarchy plugin add https://github.com/jitendradara12/omaconnect.git --enable --yes
 ```
 
-## What OmaConnect Adds
+## Features
 
-- **At-a-glance status**: Battery, charging, cellular network, reachability, and pairing state.
-- **Fast actions**: Ring a device, sync the clipboard, send a file, share text, or send a ping.
-- **SMS access**: Open `kdeconnect-sms` for a selected paired device.
-- **Native file picking**: Choose recent files from `~/Downloads`, `~/Documents`, `~/Pictures`, and `~/Videos` with Omarchy's lightweight menu.
-- **Remote commands**: Discover and run commands configured on a paired device.
-- **Pairing controls**: Pair and unpair devices with confirmation and visible status feedback.
+- **Device status**: Battery charge, charging state, cellular network type, signal strength, and reachability.
+- **Device actions**: Ring phone, sync clipboard, send files, share text or links, and send pings.
+- **SMS launcher**: Open `kdeconnect-sms` for a paired device.
+- **File picker**: Select recent files from user directories with Omarchy's menu picker.
+- **Remote commands**: View and trigger commands defined on paired devices.
+- **Pairing controls**: Pair and unpair devices with inline confirmation safeguards.
+- **Modular preferences**: Toggle specific actions, telemetry fields, or panel sections to match your workflow.
 
-OmaConnect is the Omarchy interface, not a replacement for KDE Connect. KDE Connect handles pairing and communication; this plugin makes those capabilities fast to reach from the bar.
+## Preferences and configuration
+
+You can customize OmaConnect via your Omarchy bar widget settings. All options default to `true` unless noted otherwise.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `showBatteryStats` | boolean | `true` | Display battery percentage and charging indicator |
+| `showNetworkStats` | boolean | `true` | Display cellular network type and signal strength |
+| `showDeviceTypeIcons` | boolean | `true` | Display device type icons (phone, tablet, laptop, desktop) |
+| `showRemoteCommands` | boolean | `true` | Display remote commands section |
+| `showTroubleshooting` | boolean | `true` | Display setup and firewall helpers when devices are offline |
+| `showActionRing` | boolean | `true` | Include the Ring action button |
+| `showActionClipboard` | boolean | `true` | Include the Clipboard sync button |
+| `showActionFile` | boolean | `true` | Include the File send button |
+| `showActionSms` | boolean | `true` | Include the SMS launcher button |
+| `showActionPing` | boolean | `true` | Include the Ping button |
+| `showActionText` | boolean | `true` | Include the Text and link sharing button |
+| `defaultPingMessage` | string | `""` | Default draft text for ping composer |
+
+## Security and permissions
+
+OmaConnect does not run arbitrary commands or download unverified scripts.
+
+- **Dependency installation**: The installer helper uses your system's package manager (`pacman`). It displays the exact command (`sudo pacman -S --needed kdeconnect glib2 dbus`) and asks for confirmation before requesting root privileges.
+- **Firewall setup**: The firewall helper detects UFW or firewalld, displays the exact rules before applying them, and prompts for confirmation before running `sudo`.
+- **UI tooltips**: Hovering over troubleshooting buttons displays the exact command that will execute.
 
 ## Shortcuts
 
@@ -35,26 +61,31 @@ o.bind("SUPER + SHIFT + C", "Toggle OmaConnect", "omarchy-shell shell toggle oma
 
 Requires `kdeconnect`, `glib2`, `dbus`, and Omarchy's `omarchy-menu-select` command for file sharing.
 
-The optional **Install Dependencies** action runs:
+To install dependencies manually:
 
 ```bash
-sudo pacman -S kdeconnect glib2 dbus
+sudo pacman -S --needed kdeconnect glib2 dbus
 ```
 
-This uses Arch's trusted package manager with fixed package names from your configured repositories. It does not download and pipe a script from the internet. You can run the command yourself instead.
-
-### Firewall (UFW)
+### Firewall configuration
 
 Omarchy blocks incoming ports by default. Allow KDE Connect discovery and transfer ports:
 
 ![OmaConnect screenshot of allow in firewall](preview1.png)
 
-_You can just click **"Allow in Firewall"** directly inside the OmaConnect panel if no devices appear. Or you can do it manually..._
+_Click **Allow in Firewall** inside the panel, or run manually:_
 
+For UFW:
 ```bash
 sudo ufw allow 1714:1764/tcp comment 'KDE Connect'
 sudo ufw allow 1714:1764/udp comment 'KDE Connect'
 sudo ufw reload
+```
+
+For firewalld:
+```bash
+sudo firewall-cmd --permanent --add-service=kdeconnect
+sudo firewall-cmd --reload
 ```
 
 ## Update

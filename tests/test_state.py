@@ -98,11 +98,22 @@ def format_network_status(device):
     return net_type
 
 
-def format_battery_status(device):
+def device_type_icon(dev_type):
+    t = str(dev_type or "").lower().strip()
+    return {
+        "phone": "󰏲",
+        "tablet": "󰓹",
+        "laptop": "󰌢",
+        "desktop": "󰍹",
+        "tv": "󰵔",
+    }.get(t, "󰄜")
+
+
+def format_battery_status(device, show_battery=True, show_network=True):
     if not device or not device.get("reachable", True):
         return ""
     battery_text = ""
-    if device.get("capabilities", {}).get("battery"):
+    if show_battery and device.get("capabilities", {}).get("battery"):
         battery = device.get("battery", -1)
         if battery < 0:
             battery_text = "Battery unavailable"
@@ -114,7 +125,7 @@ def format_battery_status(device):
                 battery_text = f"{battery}% • Low battery"
             else:
                 battery_text = f"{battery}% • Discharging"
-    net_text = format_network_status(device)
+    net_text = format_network_status(device) if show_network else ""
     if battery_text and net_text:
         return f"{battery_text} • {net_text}"
     if battery_text:
@@ -122,6 +133,27 @@ def format_battery_status(device):
     if net_text:
         return net_text
     return ""
+
+
+def compute_available_actions(device, settings=None):
+    if not device or not device.get("paired") or not device.get("reachable"):
+        return []
+    caps = device.get("capabilities", {})
+    s = settings or {}
+    res = []
+    if caps.get("ring") and s.get("showActionRing", True):
+        res.append("ring")
+    if caps.get("clipboard") and s.get("showActionClipboard", True):
+        res.append("clipboard")
+    if caps.get("file") and s.get("showActionFile", True):
+        res.append("file")
+    if caps.get("sms") and s.get("showActionSms", True):
+        res.append("sms")
+    if caps.get("ping") and s.get("showActionPing", True):
+        res.append("ping")
+    if caps.get("text") and s.get("showActionText", True):
+        res.append("text")
+    return res
 
 
 
@@ -1347,6 +1379,107 @@ class StateTests(unittest.TestCase):
     self.assertIn("onAvailableActionsChanged:", panel_source)
     # Escape/c unpair confirmation cancellation
     self.assertIn("root.cancelUnpairConfirm", panel_source)
+
+  def test_device_type_icon_mapping_and_defaults(self):
+    self.assertEqual(device_type_icon("phone"), "󰏲")
+    self.assertEqual(device_type_icon("tablet"), "󰓹")
+    self.assertEqual(device_type_icon("laptop"), "󰌢")
+    self.assertEqual(device_type_icon("desktop"), "󰍹")
+    self.assertEqual(device_type_icon("tv"), "󰵔")
+    self.assertEqual(device_type_icon("unknown"), "󰄜")
+    self.assertEqual(device_type_icon(""), "󰄜")
+    self.assertEqual(device_type_icon(None), "󰄜")
+
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    self.assertIn("function deviceTypeIcon(type)", controller_source)
+    service_source = (ROOT / "Service.qml").read_text()
+    self.assertIn("function deviceTypeIcon(type)", service_source)
+
+  def test_settings_action_filtering(self):
+    full_line = "DEVICE\tdev-full\tFull Phone\tphone\ttrue\ttrue\t100\ttrue\tkdeconnect_battery,kdeconnect_ping,kdeconnect_share,kdeconnect_findmyphone,kdeconnect_clipboard,kdeconnect_sms\t5G\t4"
+    dev = parse_device(full_line)
+
+    # All enabled by default
+    all_acts = compute_available_actions(dev, {})
+    self.assertEqual(all_acts, ["ring", "clipboard", "file", "sms", "ping", "text"])
+
+    # Disable SMS and ping
+    filtered_acts = compute_available_actions(dev, {"showActionSms": False, "showActionPing": False})
+    self.assertEqual(filtered_acts, ["ring", "clipboard", "file", "text"])
+
+    # Disable ring and clipboard
+    filtered_acts2 = compute_available_actions(dev, {"showActionRing": False, "showActionClipboard": False})
+    self.assertEqual(filtered_acts2, ["file", "sms", "ping", "text"])
+
+    panel_source = (ROOT / "Panel.qml").read_text()
+    self.assertIn("root.getSetting(\"showActionRing\", true)", panel_source)
+    self.assertIn("root.getSetting(\"showActionClipboard\", true)", panel_source)
+    self.assertIn("root.getSetting(\"showActionFile\", true)", panel_source)
+    self.assertIn("root.getSetting(\"showActionSms\", true)", panel_source)
+    self.assertIn("root.getSetting(\"showActionPing\", true)", panel_source)
+    self.assertIn("root.getSetting(\"showActionText\", true)", panel_source)
+
+  def test_settings_telemetry_filtering(self):
+    full_line = "DEVICE\tdev-full\tFull Phone\tphone\ttrue\ttrue\t85\ttrue\tkdeconnect_battery,kdeconnect_connectivity_report\tLTE\t3"
+    dev = parse_device(full_line)
+
+    # Full stats
+    self.assertEqual(format_battery_status(dev, show_battery=True, show_network=True), "85% • Charging • LTE (3/4)")
+
+    # Battery only
+    self.assertEqual(format_battery_status(dev, show_battery=True, show_network=False), "85% • Charging")
+
+    # Network only
+    self.assertEqual(format_battery_status(dev, show_battery=False, show_network=True), "LTE (3/4)")
+
+    # Neither
+    self.assertEqual(format_battery_status(dev, show_battery=False, show_network=False), "")
+
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    self.assertIn("function deviceBatteryText(device, showBattery, showNetwork)", controller_source)
+
+  def test_privileged_script_transparency_and_confirmation_prompts(self):
+    # install_dependencies.sh must preview the exact command and prompt
+    install_source = (ROOT / "scripts" / "install_dependencies.sh").read_text()
+    self.assertIn("Exact command that will be executed:", install_source)
+    self.assertIn("sudo pacman -S --needed kdeconnect glib2 dbus", install_source)
+    self.assertIn("Press Enter to proceed", install_source)
+    self.assertIn("Ctrl+C to cancel", install_source)
+
+    # setup_firewall.sh must preview commands and support ufw / firewalld
+    firewall_source = (ROOT / "scripts" / "setup_firewall.sh").read_text()
+    self.assertIn("1714-1764", firewall_source)
+    self.assertIn("sudo ufw allow 1714:1764/tcp", firewall_source)
+    self.assertIn("sudo ufw allow 1714:1764/udp", firewall_source)
+    self.assertIn("sudo ufw reload", firewall_source)
+    self.assertIn("firewall-cmd", firewall_source)
+    self.assertIn("Press Enter to apply", firewall_source)
+
+  def test_settings_schema_in_manifest(self):
+    manifest = json.loads((ROOT / "manifest.json").read_text())
+    self.assertIn("settings", manifest)
+    settings = manifest["settings"]
+    self.assertIn("showBatteryStats", settings)
+    self.assertIn("showNetworkStats", settings)
+    self.assertIn("showDeviceTypeIcons", settings)
+    self.assertIn("showRemoteCommands", settings)
+    self.assertIn("showTroubleshooting", settings)
+    self.assertIn("showActionRing", settings)
+    self.assertIn("showActionClipboard", settings)
+    self.assertIn("showActionFile", settings)
+    self.assertIn("showActionSms", settings)
+    self.assertIn("showActionPing", settings)
+    self.assertIn("showActionText", settings)
+    self.assertIn("defaultPingMessage", settings)
+
+  def test_ui_tooltips_and_security_transparency(self):
+    device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertIn("tooltipText: \"Runs: sudo pacman", device_section)
+    self.assertIn("tooltipText: \"Runs: sudo ufw", device_section)
+
+    action_toolbar = (ROOT / "components" / "ActionToolbar.qml").read_text()
+    self.assertIn("actionTooltip", action_toolbar)
+    self.assertIn("tooltipText: actionTooltip", action_toolbar)
 
 
 if __name__ == "__main__":
