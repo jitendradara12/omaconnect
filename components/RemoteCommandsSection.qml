@@ -11,7 +11,7 @@ Column {
 
     width: parent ? parent.width : 0
     spacing: Style.space(6)
-    visible: !!(panel && panel.device && panel.device.paired && panel.device.reachable && panel.device.capabilities && panel.device.capabilities.commands)
+    visible: !!(panel && panel.device && panel.device.paired && panel.device.reachable && panel.device.capabilities && panel.device.capabilities.commands && (!panel.getSetting || panel.getSetting("showRemoteCommands", true)))
 
     readonly property var bar: panel ? panel.bar : null
     readonly property var service: panel ? panel.service : null
@@ -96,7 +96,7 @@ Column {
                 required property var modelData
                 required property int index
                 width: parent.width
-                implicitHeight: cmdBtnText.implicitHeight + Style.space(8)
+                implicitHeight: cmdRow.implicitHeight + Style.space(8)
                 hasCursor: panel.cursorActive && panel.focusSection === "commands" && panel.commandsExpanded && panel.commandSelectedIndex === index
                 foreground: root.foreground
                 fill: Style.hoverFillFor(root.foreground, Color.accent)
@@ -111,15 +111,33 @@ Column {
                     }
                     onClicked: if (root.service && root.device) root.service.executeRemoteCommand(root.device.id, modelData.key)
                 }
-                Text {
-                    id: cmdBtnText
+                Row {
+                    id: cmdRow
                     anchors.left: parent.left
+                    anchors.right: parent.right
                     anchors.leftMargin: Style.space(8)
+                    anchors.rightMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
-                    text: modelData.name
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
+                    spacing: Style.space(6)
+
+                    Text {
+                        text: "󰘳"
+                        color: Qt.darker(root.foreground, 1.4)
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        id: cmdBtnText
+                        text: modelData.name
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.bodySmall
+                        elide: Text.ElideRight
+                        width: Math.max(1, parent.width - Style.space(20))
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
             }
         }

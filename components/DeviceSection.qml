@@ -19,6 +19,11 @@ Column {
     readonly property color foreground: bar ? bar.foreground : "#ffffff"
     readonly property string fontFamily: bar ? bar.fontFamily : "sans-serif"
 
+    readonly property bool showBattery: !panel || (typeof panel.getSetting === "function" ? panel.getSetting("showBatteryStats", true) : true)
+    readonly property bool showNetwork: !panel || (typeof panel.getSetting === "function" ? panel.getSetting("showNetworkStats", true) : true)
+    readonly property bool showDeviceTypeIcons: !panel || (typeof panel.getSetting === "function" ? panel.getSetting("showDeviceTypeIcons", true) : true)
+    readonly property bool showTroubleshooting: !panel || (typeof panel.getSetting === "function" ? panel.getSetting("showTroubleshooting", true) : true)
+
     Item {
         width: parent.width
         implicitHeight: heroLayout.implicitHeight
@@ -49,14 +54,29 @@ Column {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(2)
 
-                Text {
-                    text: root.device ? root.deviceName : "KDE Connect"
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.title
-                    font.bold: true
-                    elide: Text.ElideRight
+                Row {
+                    spacing: Style.space(6)
                     width: parent.width
+
+                    Text {
+                        visible: root.showDeviceTypeIcons && !!(root.device && root.device.type && root.device.type !== "unknown")
+                        text: root.service ? root.service.deviceTypeIcon(root.device ? root.device.type : "") : ""
+                        color: Color.accent
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.title
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        text: root.device ? root.deviceName : "KDE Connect"
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.title
+                        font.bold: true
+                        elide: Text.ElideRight
+                        width: Math.max(1, parent.width - (root.showDeviceTypeIcons && !!(root.device && root.device.type && root.device.type !== "unknown") ? Style.space(24) : 0))
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
 
                 Text {
@@ -75,12 +95,12 @@ Column {
                 }
 
                 Row {
-                    visible: !!(root.device && root.device.reachable && root.service && root.service.deviceBatteryText(root.device) !== "")
+                    visible: !!(root.device && root.device.reachable && root.service && root.service.deviceBatteryText(root.device, root.showBattery, root.showNetwork) !== "")
                     spacing: Style.space(6)
 
                     Text {
-                        text: root.service ? ((root.device.capabilities && root.device.capabilities.battery) ? root.service.deviceBatteryIcon(root.device) : root.service.deviceNetworkIcon(root.device)) : ""
-                        color: (root.device && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
+                        text: root.service ? ((root.showBattery && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0) ? root.service.deviceBatteryIcon(root.device) : root.service.deviceNetworkIcon(root.device)) : ""
+                        color: (root.showBattery && root.device && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
                             ? Color.urgent
                             : ((root.device && (root.device.isCharging || root.device.charging)) ? Color.accent : root.foreground)
                         font.family: root.fontFamily
@@ -89,13 +109,13 @@ Column {
                     }
 
                     Text {
-                        text: root.service ? root.service.deviceBatteryText(root.device) : ""
-                        color: (root.device && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
+                        text: root.service ? root.service.deviceBatteryText(root.device, root.showBattery, root.showNetwork) : ""
+                        color: (root.showBattery && root.device && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
                             ? Color.urgent
                             : ((root.device && (root.device.isCharging || root.device.charging)) ? Color.accent : root.foreground)
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.bodySmall
-                        font.bold: !!(root.device && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
+                        font.bold: !!(root.showBattery && root.device && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }
@@ -293,17 +313,33 @@ Column {
                     }
                 }
 
-                Text {
-                    id: nameText
+                Row {
+                    id: leftInfoRow
                     anchors.left: parent.left
                     anchors.right: rightActionItem.left
                     anchors.rightMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
-                    text: modelData.name
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
-                    elide: Text.ElideRight
+                    spacing: Style.space(6)
+
+                    Text {
+                        visible: root.showDeviceTypeIcons
+                        text: root.service ? root.service.deviceTypeIcon(modelData.type) : "󰄜"
+                        color: (root.service && root.service.selectedDeviceId === modelData.id) ? Color.accent : Qt.darker(root.foreground, 1.4)
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.body
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        id: nameText
+                        text: modelData.name
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.body
+                        elide: Text.ElideRight
+                        width: Math.max(1, leftInfoRow.width - (root.showDeviceTypeIcons ? Style.space(20) : 0))
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
             }
         }
@@ -327,7 +363,7 @@ Column {
         }
 
         Row {
-            visible: !(root.service && root.service.scanning) && (root.service && root.service.discoveryState === "not_installed")
+            visible: !(root.service && root.service.scanning) && (root.service && root.service.discoveryState === "not_installed") && root.showTroubleshooting
             spacing: Style.space(6)
 
             Text {
@@ -340,6 +376,7 @@ Column {
 
             Button {
                 text: "Install Dependencies"
+                tooltipText: "Runs: sudo pacman -S --needed kdeconnect glib2 dbus"
                 foreground: root.foreground
                 fontFamily: root.fontFamily
                 onClicked: if (root.service) root.service.installDependencies()
@@ -347,7 +384,7 @@ Column {
         }
 
         Row {
-            visible: !(root.service && root.service.scanning) && (root.service && root.service.discoveryState === "unavailable")
+            visible: !(root.service && root.service.scanning) && (root.service && root.service.discoveryState === "unavailable") && root.showTroubleshooting
             spacing: Style.space(6)
 
             Text {
@@ -360,6 +397,7 @@ Column {
 
             Button {
                 text: "Start Service"
+                tooltipText: "Attempts to start KDE Connect background service"
                 foreground: root.foreground
                 fontFamily: root.fontFamily
                 onClicked: if (root.service) root.service.refresh(true)
@@ -367,7 +405,7 @@ Column {
         }
 
         Row {
-            visible: !(root.service && root.service.scanning) && (!root.service || (root.service.discoveryState !== "not_installed" && root.service.discoveryState !== "unavailable"))
+            visible: !(root.service && root.service.scanning) && (!root.service || (root.service.discoveryState !== "not_installed" && root.service.discoveryState !== "unavailable")) && root.showTroubleshooting
             spacing: Style.space(6)
 
             Text {
@@ -380,6 +418,7 @@ Column {
 
             Button {
                 text: "Allow in Firewall"
+                tooltipText: "Runs: sudo ufw allow 1714:1764/tcp & udp (or firewalld)"
                 foreground: root.foreground
                 fontFamily: root.fontFamily
                 onClicked: if (root.service) root.service.configureFirewall()

@@ -59,7 +59,14 @@ BarWidget {
         anchors.fill: parent
         bar: root.bar
         text: "󰄜"
-        tooltipText: root.deviceName
+        tooltipText: {
+            if (!root.device || !root.device.reachable) return root.deviceName
+            var showBat = !root.settings || root.settings.showBatteryStats !== false
+            if (showBat && root.device.battery >= 0) {
+                return root.deviceName + " (" + root.device.battery + "%)"
+            }
+            return root.deviceName
+        }
 
         onPressed: function(b) {
             root.togglePanel()
