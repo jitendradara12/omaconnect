@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "omaconnect",
   "name": "OmaConnect",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Jitendra Dara (jitendradara12)",
-  "description": "Seamless KDE Connect integration for Omarchy -- SMS messaging, battery & cellular stats, clipboard sync, file sharing, and remote device commands.",
+  "description": "Seamless KDE Connect integration for Omarchy: SMS messaging, battery & cellular stats, clipboard sync, file sharing, and remote device commands.",
   "license": "MIT",
   "homepage": "https://github.com/jitendradara12/omaconnect",
   "repository": "https://github.com/jitendradara12/omaconnect",
@@ -22,5 +22,19 @@
     "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "right"
+  },
+  "settings": {
+    "showBatteryStats": { "type": "boolean", "default": true, "description": "Display battery percentage and charging state" },
+    "showNetworkStats": { "type": "boolean", "default": true, "description": "Display cellular network type and signal strength" },
+    "showDeviceTypeIcons": { "type": "boolean", "default": true, "description": "Show device type icons" },
+    "showRemoteCommands": { "type": "boolean", "default": true, "description": "Display remote commands section" },
+    "showTroubleshooting": { "type": "boolean", "default": true, "description": "Display setup and firewall helpers when devices are offline" },
+    "showActionRing": { "type": "boolean", "default": true, "description": "Include Ring device action" },
+    "showActionClipboard": { "type": "boolean", "default": true, "description": "Include Clipboard sync action" },
+    "showActionFile": { "type": "boolean", "default": true, "description": "Include File transfer action" },
+    "showActionSms": { "type": "boolean", "default": true, "description": "Include SMS conversation action" },
+    "showActionPing": { "type": "boolean", "default": true, "description": "Include Ping action" },
+    "showActionText": { "type": "boolean", "default": true, "description": "Include Text and link sharing action" },
+    "defaultPingMessage": { "type": "string", "default": "", "description": "Default draft message for ping" }
   }
 }

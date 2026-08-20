@@ -49,16 +49,24 @@ KeyboardPanel {
     function toggle() { opened = !opened }
     function closeForPopoutSwitch() { opened = false }
 
+    function getSetting(key, defaultValue) {
+        if (!settings || typeof settings !== "object") return defaultValue
+        if (key in settings && settings[key] !== undefined && settings[key] !== null) {
+            return settings[key]
+        }
+        return defaultValue
+    }
+
     readonly property var availableActions: {
         if (!root.device || !root.device.paired || !root.device.reachable) return []
         var caps = root.device.capabilities || {}
         var res = []
-        if (caps.ring) res.push("ring")
-        if (caps.clipboard) res.push("clipboard")
-        if (caps.file) res.push("file")
-        if (caps.sms) res.push("sms")
-        if (caps.ping) res.push("ping")
-        if (caps.text) res.push("text")
+        if (caps.ring && root.getSetting("showActionRing", true)) res.push("ring")
+        if (caps.clipboard && root.getSetting("showActionClipboard", true)) res.push("clipboard")
+        if (caps.file && root.getSetting("showActionFile", true)) res.push("file")
+        if (caps.sms && root.getSetting("showActionSms", true)) res.push("sms")
+        if (caps.ping && root.getSetting("showActionPing", true)) res.push("ping")
+        if (caps.text && root.getSetting("showActionText", true)) res.push("text")
         return res
     }
 
@@ -130,6 +138,10 @@ KeyboardPanel {
         composerError = ""
         activeComposer = type
         if (type === "ping") {
+            if (!draftPing) {
+                var defPing = root.getSetting("defaultPingMessage", "")
+                if (defPing) draftPing = defPing
+            }
             focusSection = "ping"
             Qt.callLater(function() { if (composerSection && composerSection.pingInput) composerSection.pingInput.forceActiveFocus() })
         } else if (type === "text") {

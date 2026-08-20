@@ -46,7 +46,8 @@ Item {
     function configureFirewall() { controller.configureFirewall() }
     function installDependencies() { controller.installDependencies() }
     function deviceOverviewStatus(device) { return controller.deviceOverviewStatus(device) }
-    function deviceBatteryText(device) { return controller.deviceBatteryText(device) }
+    function deviceTypeIcon(type) { return controller.deviceTypeIcon(type) }
+    function deviceBatteryText(device, showBattery, showNetwork) { return controller.deviceBatteryText(device, showBattery, showNetwork) }
     function deviceBatteryIcon(device) { return controller.deviceBatteryIcon(device) }
     function deviceNetworkIcon(device) { return controller.deviceNetworkIcon(device) }
 }

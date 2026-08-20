@@ -187,10 +187,22 @@ Item {
         return "Paired & reachable"
     }
 
-    function deviceBatteryText(device) {
+    function deviceTypeIcon(type) {
+        var t = String(type || "").toLowerCase().trim()
+        if (t === "phone") return "󰏲"
+        if (t === "tablet") return "󰓹"
+        if (t === "laptop") return "󰌢"
+        if (t === "desktop") return "󰍹"
+        if (t === "tv") return "󰵔"
+        return "󰄜"
+    }
+
+    function deviceBatteryText(device, showBattery, showNetwork) {
         if (!device || !device.reachable) return ""
+        var batteryAllowed = showBattery !== false
+        var networkAllowed = showNetwork !== false
         var batteryText = ""
-        if (device.capabilities && device.capabilities.battery) {
+        if (batteryAllowed && device.capabilities && device.capabilities.battery) {
             if (device.battery < 0) {
                 batteryText = "Battery unavailable"
             } else {
@@ -201,7 +213,7 @@ Item {
             }
         }
         var netText = ""
-        if (device.networkType) {
+        if (networkAllowed && device.networkType) {
             var type = String(device.networkType).trim()
             if (type && type !== "null") {
                 var str = device.networkStrength
