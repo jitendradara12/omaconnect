@@ -33,6 +33,7 @@ Column {
 
     CursorSurface {
         id: collapsedBar
+        visible: !panel.mediaExpanded
         width: parent.width
         implicitHeight: headerRow.implicitHeight + Style.space(6)
         hasCursor: panel.cursorActive && panel.focusSection === "media" && !panel.mediaExpanded
@@ -55,7 +56,9 @@ Column {
         Row {
             id: headerRow
             anchors.left: parent.left
+            anchors.leftMargin: Style.space(6)
             anchors.right: parent.right
+            anchors.rightMargin: Style.space(6)
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(6)
 
@@ -68,28 +71,22 @@ Column {
             }
 
             Text {
-                width: Math.max(1, parent.width - Style.space(36))
-                text: {
-                    if (root.service && root.service.mediaLoading) return "SYNCING…"
-                    if (root.trackTitle && root.trackArtist) return (root.trackTitle + "  •  " + root.trackArtist).toUpperCase()
-                    return root.trackTitle.toUpperCase()
-                }
+                width: Math.max(1, parent.width - Style.space(40))
+                text: root.trackTitle + (root.trackArtist ? "  •  " + root.trackArtist : "")
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 font.bold: true
-                font.capitalization: Font.AllUppercase
                 elide: Text.ElideRight
                 anchors.verticalCenter: parent.verticalCenter
             }
 
             Text {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: panel.mediaExpanded ? "󰅃" : "󰅀"
+                text: "󰅀"
                 color: Qt.darker(root.foreground, 1.4)
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
+                anchors.verticalCenter: parent.verticalCenter
             }
         }
     }
@@ -120,6 +117,19 @@ Column {
             anchors.fill: parent
             visible: backdropArt.visible
             color: Qt.rgba(0, 0, 0, 0.35)
+        }
+
+        PanelActionButton {
+            id: minimizeBtn
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: Style.space(8)
+            iconText: "󰅃"
+            tooltipText: "Minimize"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: panel.toggleMediaExpanded()
+            z: 2
         }
 
         Column {
@@ -165,7 +175,7 @@ Column {
                 }
 
                 Column {
-                    width: Math.max(1, parent.width - coverFrame.width - Style.space(10))
+                    width: Math.max(1, parent.width - coverFrame.width - Style.space(10) - minimizeBtn.implicitWidth)
                     spacing: Style.space(4)
                     anchors.verticalCenter: parent.verticalCenter
 
