@@ -155,7 +155,7 @@ Column {
 
                 Column {
                     width: Math.max(1, parent.width - coverFrame.width - Style.space(10))
-                    spacing: Style.space(3)
+                    spacing: Style.space(4)
                     anchors.verticalCenter: parent.verticalCenter
 
                     Text {
@@ -191,67 +191,66 @@ Column {
                         elide: Text.ElideRight
                     }
 
-                    CursorSurface {
+                    Flow {
                         id: playerControlsRow
-                        visible: root.trackPlayer !== ""
+                        visible: root.playerList.length > 0 || root.trackPlayer !== ""
                         width: parent.width
-                        implicitHeight: Style.space(24)
-                        enabled: root.playerList.length > 1
-                        opacity: enabled ? 1 : 0.75
-                        radius: Style.cornerRadius
-                        foreground: root.foreground
-                        fill: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06)
-                        currentFill: Style.selectedFillFor(root.foreground, Color.accent)
+                        spacing: Style.space(6)
 
-                        PanelToolTip {
-                            visible: playerMouseArea.containsMouse && root.playerList.length > 1
-                            text: "Switch media player"
-                            fontFamily: root.fontFamily
-                        }
+                        Repeater {
+                            model: root.playerList.length > 0 ? root.playerList : (root.trackPlayer !== "" ? [root.trackPlayer] : [])
+                            delegate: CursorSurface {
+                                id: playerChipSurface
+                                required property string modelData
+                                required property int index
+                                readonly property bool isCurrent: modelData === root.trackPlayer
 
-                        MouseArea {
-                            id: playerMouseArea
-                            anchors.fill: parent
-                            enabled: root.playerList.length > 1
-                            hoverEnabled: true
-                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                            onClicked: root.cyclePlayer()
-                        }
+                                implicitWidth: chipContent.implicitWidth + Style.space(14)
+                                implicitHeight: Style.space(22)
+                                radius: Style.cornerRadius
+                                foreground: root.foreground
+                                fill: isCurrent ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06)
+                                currentFill: Style.selectedFillFor(root.foreground, Color.accent)
 
-                        Text {
-                            anchors.left: parent.left
-                            anchors.leftMargin: Style.space(7)
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "󰐌"
-                            color: Color.accent
-                            font.family: root.fontFamily
-                            font.pixelSize: Style.font.caption
-                        }
+                                PanelToolTip {
+                                    visible: chipMouseArea.containsMouse && !isCurrent
+                                    text: "Switch to " + modelData
+                                    fontFamily: root.fontFamily
+                                }
 
-                        Text {
-                            id: playerNameText
-                            anchors.left: parent.left
-                            anchors.leftMargin: Style.space(24)
-                            anchors.right: switchIcon.left
-                            anchors.rightMargin: Style.space(4)
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: root.trackPlayer
-                            color: root.foreground
-                            font.family: root.fontFamily
-                            font.pixelSize: Style.font.caption
-                            elide: Text.ElideRight
-                        }
+                                MouseArea {
+                                    id: chipMouseArea
+                                    anchors.fill: parent
+                                    enabled: !isCurrent && root.playerList.length > 1
+                                    hoverEnabled: true
+                                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    onClicked: if (root.service && root.device && modelData) root.service.mediaSelectPlayer(root.device.id, modelData)
+                                }
 
-                        Text {
-                            id: switchIcon
-                            anchors.right: parent.right
-                            anchors.rightMargin: Style.space(7)
-                            anchors.verticalCenter: parent.verticalCenter
-                            visible: root.playerList.length > 1
-                            text: "󰑐"
-                            color: Qt.darker(root.foreground, 1.25)
-                            font.family: root.fontFamily
-                            font.pixelSize: Style.font.caption
+                                Row {
+                                    id: chipContent
+                                    anchors.centerIn: parent
+                                    spacing: Style.space(5)
+
+                                    Text {
+                                        text: "󰐌"
+                                        color: isCurrent ? Color.accent : Qt.darker(root.foreground, 1.4)
+                                        font.family: root.fontFamily
+                                        font.pixelSize: Style.font.caption
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+
+                                    Text {
+                                        id: playerNameText
+                                        text: modelData
+                                        color: isCurrent ? root.foreground : Qt.darker(root.foreground, 1.3)
+                                        font.family: root.fontFamily
+                                        font.pixelSize: Style.font.caption
+                                        font.bold: isCurrent
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+                            }
                         }
                     }
                 }
