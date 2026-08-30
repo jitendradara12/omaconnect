@@ -60,12 +60,17 @@ def clean_val(raw):
         val = m2.group(1).strip() if m2 else raw
     if val.startswith("'") and val.endswith("'"):
         val = val[1:-1]
+    elif val.startswith('"') and val.endswith('"'):
+        val = val[1:-1]
     return val
 
 is_playing_raw = get_prop("isPlaying")
 is_playing = "<true>" in is_playing_raw or "(true," in is_playing_raw
 
 title = clean_val(get_prop("title"))
+if not title:
+    title = clean_val(get_prop("nowPlaying"))
+
 artist = clean_val(get_prop("artist"))
 album = clean_val(get_prop("album"))
 player = clean_val(get_prop("player"))
@@ -91,6 +96,15 @@ if player_list_raw:
         if matches:
             player_list = matches
 
+if not player_list:
+    try:
+        subprocess.run([
+            "gdbus", "call", "--session", "--dest", "org.kde.kdeconnect",
+            "--object-path", base, "--method", "org.kde.kdeconnect.device.mprisremote.requestPlayerList"
+        ], capture_output=True, text=True, timeout=1)
+    except Exception:
+        pass
+
 if player and player not in player_list:
     player_list.insert(0, player)
 
@@ -108,10 +122,20 @@ PYEOF
         else
             is_playing=$(value "$(property isPlaying 2>/dev/null)") || is_playing=false
             title=$(value "$(property title 2>/dev/null)") || title=""
+            if [[ -z "$title" ]]; then
+                title=$(value "$(property nowPlaying 2>/dev/null)") || title=""
+            fi
             artist=$(value "$(property artist 2>/dev/null)") || artist=""
             album=$(value "$(property album 2>/dev/null)") || album=""
             player=$(value "$(property player 2>/dev/null)") || player=""
             album_art=$(value "$(property albumArtUrl 2>/dev/null)") || album_art=""
+            if [[ -z "$album_art" ]]; then
+                album_art=$(value "$(property artUrl 2>/dev/null)") || album_art=""
+            fi
+            if [[ -z "$album_art" ]]; then
+                album_art=$(value "$(property albumArt 2>/dev/null)") || album_art=""
+            fi
+            gdbus call --session --dest org.kde.kdeconnect --object-path "$base" --method org.kde.kdeconnect.device.mprisremote.requestPlayerList >/dev/null 2>&1 || true
             [[ "$is_playing" == true ]] || is_playing=false
             printf '{"isPlaying":%s,"title":"%s","artist":"%s","album":"%s","player":"%s","playerList":[],"albumArt":"%s"}\n' \
                 "$is_playing" "${title//\"/\\\"}" "${artist//\"/\\\"}" "${album//\"/\\\"}" "${player//\"/\\\"}" "${album_art//\"/\\\"}"
@@ -126,7 +150,7 @@ PYEOF
         ;;
     player)
         target_player="$argument"
-        [[ -n "$target_player" ]] || exit 64
+        [[ -n "$target_player" && "$target_player" != *$'\n'* && "$target_player" != *$'\r'* ]] || exit 64
         gdbus call --session --dest org.kde.kdeconnect \
             --object-path "$base" \
             --method org.kde.kdeconnect.device.mprisremote.setPlayer "$target_player" >/dev/null 2>&1 || \

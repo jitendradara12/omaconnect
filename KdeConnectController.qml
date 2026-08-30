@@ -96,6 +96,7 @@ Item {
             mediaLoading = false
             if (mediaStatusProcess.running) mediaStatusProcess.running = false
             if (mediaActionProcess.running) mediaActionProcess.running = false
+            if (mediaPlayerProcess.running) mediaPlayerProcess.running = false
         }
         selectedDeviceId = next.id
         remoteCommands = []
@@ -789,14 +790,6 @@ Item {
         return sendMediaAction(id, "PlayPause")
     }
 
-    function mediaPlay(id) {
-        return sendMediaAction(id, "Play")
-    }
-
-    function mediaPause(id) {
-        return sendMediaAction(id, "Pause")
-    }
-
     function mediaNext(id) {
         return sendMediaAction(id, "Next")
     }
@@ -809,10 +802,10 @@ Item {
         var devId = id || selectedDeviceId
         var device = deviceById(devId)
         if (!device || !canAct(devId) || !device.capabilities || !device.capabilities.media) return false
-        if (mediaActionProcess.running) return false
-        mediaActionProcess.targetDeviceId = String(devId)
-        mediaActionProcess.command = ["bash", getMediaScriptPath(), "player", String(devId), String(playerName)]
-        mediaActionProcess.running = true
+        if (mediaPlayerProcess.running) return false
+        mediaPlayerProcess.targetDeviceId = String(devId)
+        mediaPlayerProcess.command = ["bash", getMediaScriptPath(), "player", String(devId), String(playerName)]
+        mediaPlayerProcess.running = true
         return true
     }
 
@@ -1084,8 +1077,18 @@ Item {
         }
     }
 
+    Process {
+        id: mediaPlayerProcess
+        property string targetDeviceId: ""
+        onExited: function(code) {
+            if (code === 0 && targetDeviceId === root.selectedDeviceId) {
+                root.fetchMediaStatus(targetDeviceId)
+            }
+        }
+    }
+
     Timer { id: signalRestart; repeat: false; onTriggered: if (!signalProcess.running) signalProcess.running = true }
     Timer { interval: 15000; running: !signalProcess.running; repeat: true; onTriggered: root.refresh() }
     Component.onCompleted: { root.refresh(); root.refreshTailscale(); signalProcess.running = true }
-    Component.onDestruction: { actionDismissTimer.stop(); dbusDebounceTimer.stop(); mediaDebounceTimer.stop(); pairingWatchdogTimer.stop(); signalRestart.stop(); signalProcess.running = false; scanProcess.running = false; commandsProcess.running = false; actionProcess.running = false; pairProcess.running = false; pairResponseProcess.running = false; filePickerProcess.running = false; tailscaleProcess.running = false; addressProcess.running = false; firewallProcess.running = false; installProcess.running = false; appProcess.running = false; mediaStatusProcess.running = false; mediaActionProcess.running = false }
+    Component.onDestruction: { actionDismissTimer.stop(); dbusDebounceTimer.stop(); mediaDebounceTimer.stop(); pairingWatchdogTimer.stop(); signalRestart.stop(); signalProcess.running = false; scanProcess.running = false; commandsProcess.running = false; actionProcess.running = false; pairProcess.running = false; pairResponseProcess.running = false; filePickerProcess.running = false; tailscaleProcess.running = false; addressProcess.running = false; firewallProcess.running = false; installProcess.running = false; appProcess.running = false; mediaStatusProcess.running = false; mediaActionProcess.running = false; mediaPlayerProcess.running = false }
 }

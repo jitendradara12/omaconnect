@@ -86,7 +86,7 @@ Column {
                 }
 
                 Text {
-                    visible: !panel.mediaExpanded && root.isPlaying && root.trackTitle !== "" && root.trackTitle !== "No active media"
+                    visible: !panel.mediaExpanded && root.trackTitle !== "" && root.trackTitle !== "No active media"
                     text: "• " + root.trackTitle
                     color: Qt.darker(root.foreground, 1.4)
                     font.family: root.fontFamily
@@ -190,8 +190,8 @@ Column {
                             required property string modelData
                             required property int index
                             readonly property bool isCurrent: modelData === root.trackPlayer
-                            implicitWidth: pText.implicitWidth + Style.space(8)
-                            implicitHeight: pText.implicitHeight + Style.space(4)
+                            implicitWidth: playerNameText.implicitWidth + Style.space(8)
+                            implicitHeight: playerNameText.implicitHeight + Style.space(4)
                             radius: Style.cornerRadius
                             foreground: root.foreground
                             fill: isCurrent ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06)
@@ -201,12 +201,12 @@ Column {
                                 anchors.fill: parent
                                 enabled: root.playerList.length > 1
                                 hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
+                                cursorShape: root.playerList.length > 1 ? Qt.PointingHandCursor : Qt.ArrowCursor
                                 onClicked: if (root.service && root.device && modelData) root.service.mediaSelectPlayer(root.device.id, modelData)
                             }
 
                             Text {
-                                id: pText
+                                id: playerNameText
                                 anchors.centerIn: parent
                                 text: modelData
                                 color: isCurrent ? root.foreground : Qt.darker(root.foreground, 1.3)

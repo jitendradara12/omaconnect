@@ -73,8 +73,6 @@ Item {
     function deviceNetworkIcon(device) { return controller.deviceNetworkIcon(device) }
     function fetchMediaStatus(id) { return controller.fetchMediaStatus(id) }
     function mediaPlayPause(id) { return controller.mediaPlayPause(id) }
-    function mediaPlay(id) { return controller.mediaPlay(id) }
-    function mediaPause(id) { return controller.mediaPause(id) }
     function mediaNext(id) { return controller.mediaNext(id) }
     function mediaPrevious(id) { return controller.mediaPrevious(id) }
     function mediaSelectPlayer(id, playerName) { return controller.mediaSelectPlayer(id, playerName) }

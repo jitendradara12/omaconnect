@@ -1735,12 +1735,16 @@ class StateTests(unittest.TestCase):
     res = subprocess.run(["bash", str(script_path), "player", "dev-1", ""], capture_output=True, check=False)
     self.assertEqual(res.returncode, 64)
 
+    # Player switch with newline or carriage return exits with code 64
+    res = subprocess.run(["bash", str(script_path), "player", "dev-1", "Spotify\nBad"], capture_output=True, check=False)
+    self.assertEqual(res.returncode, 64)
+
   def test_media_player_qml_contracts_and_components(self):
     controller_source = (ROOT / "KdeConnectController.qml").read_text()
     self.assertIn("function fetchMediaStatus(id)", controller_source)
     self.assertIn("function mediaPlayPause(id)", controller_source)
-    self.assertIn("function mediaPlay(id)", controller_source)
-    self.assertIn("function mediaPause(id)", controller_source)
+    self.assertNotIn("function mediaPlay(id)", controller_source)
+    self.assertNotIn("function mediaPause(id)", controller_source)
     self.assertIn("function mediaNext(id)", controller_source)
     self.assertIn("function mediaPrevious(id)", controller_source)
     self.assertIn("function mediaSelectPlayer(id, playerName)", controller_source)
@@ -1748,12 +1752,15 @@ class StateTests(unittest.TestCase):
     self.assertIn("property bool mediaLoading:", controller_source)
     self.assertIn("id: mediaStatusProcess", controller_source)
     self.assertIn("id: mediaActionProcess", controller_source)
+    self.assertIn("id: mediaPlayerProcess", controller_source)
 
     service_source = (ROOT / "Service.qml").read_text()
     self.assertIn("property alias mediaState: controller.mediaState", service_source)
     self.assertIn("property alias mediaLoading: controller.mediaLoading", service_source)
     self.assertIn("function fetchMediaStatus(id)", service_source)
     self.assertIn("function mediaPlayPause(id)", service_source)
+    self.assertNotIn("function mediaPlay(id)", service_source)
+    self.assertNotIn("function mediaPause(id)", service_source)
     self.assertIn("function mediaNext(id)", service_source)
     self.assertIn("function mediaPrevious(id)", service_source)
     self.assertIn("function mediaSelectPlayer(id, playerName)", service_source)
@@ -1774,7 +1781,23 @@ class StateTests(unittest.TestCase):
     self.assertIn("playPauseBtn", media_section)
     self.assertIn("nextBtn", media_section)
     self.assertIn("playerControlsRow", media_section)
+    self.assertIn("playerNameText", media_section)
+    self.assertNotIn("id: pText", media_section)
     self.assertIn("bgArt", media_section)
+
+  def test_media_player_keyboard_navigation_in_panel(self):
+    panel_source = (ROOT / "Panel.qml").read_text()
+    self.assertIn('focusSection === "media"', panel_source)
+    self.assertIn('root.focusSection = "media"', panel_source)
+    self.assertIn('toggleMediaExpanded()', panel_source)
+
+  def test_media_player_readme_and_manifest_accuracy(self):
+    readme_source = (ROOT / "README.md").read_text()
+    self.assertIn("player switching", readme_source)
+    self.assertNotIn("volume", readme_source)
+
+    manifest_source = (ROOT / "manifest.json").read_text()
+    self.assertIn("showMediaPlayer", manifest_source)
 
 
 if __name__ == "__main__":

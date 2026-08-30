@@ -17,7 +17,7 @@ omarchy plugin add https://github.com/jitendradara12/omaconnect.git --enable --y
 - **Device status**: Battery charge, charging state, cellular network type, signal strength, and reachability.
 - **Device actions**: Ring phone, sync clipboard, send files, share text or links, and send pings.
 - **SMS launcher**: Open `kdeconnect-sms` for a paired device.
-- **Media player**: View track metadata and control playback (play, pause, skip, volume) on paired devices.
+- **Media player**: View track metadata and control playback (play, pause, skip, player switching) on paired devices.
 - **File picker**: Select recent files from user directories with Omarchy's menu picker.
 - **Remote commands**: View and trigger commands defined on paired devices.
 - **Pairing controls**: Start pairing, verify and accept/reject incoming requests, and unpair with inline confirmation safeguards.
