@@ -10,7 +10,7 @@ Column {
     required property var panel
 
     width: parent ? parent.width : 0
-    spacing: Style.space(8)
+    spacing: Style.space(6)
     visible: !!(panel && panel.mediaPlayerVisible)
 
     readonly property var bar: panel ? panel.bar : null
@@ -26,9 +26,6 @@ Column {
     readonly property string trackArtist: (media && media.artist) ? media.artist : ""
     readonly property string trackAlbum: (media && media.album) ? media.album : ""
     readonly property string trackPlayer: (media && media.player) ? media.player : ""
-    readonly property int currentVolume: (media && typeof media.volume === "number") ? media.volume : -1
-    readonly property int trackPosition: (media && typeof media.position === "number") ? media.position : 0
-    readonly property int trackLength: (media && typeof media.length === "number") ? media.length : 0
 
     PanelSeparator { foreground: root.foreground }
 
@@ -36,16 +33,62 @@ Column {
         width: parent.width
         spacing: Style.space(6)
 
-        PanelSectionHeader {
-            text: "MEDIA CONTROLS"
+        CursorSurface {
+            width: Math.max(1, parent.width - (panel.mediaExpanded ? refreshMediaBtn.implicitWidth + Style.space(6) : 0))
+            implicitHeight: headerRow.implicitHeight + Style.space(6)
+            hasCursor: panel.cursorActive && panel.focusSection === "media" && !panel.mediaExpanded
+            radius: Style.cornerRadius
             foreground: root.foreground
-            fontFamily: root.fontFamily
-            anchors.verticalCenter: parent.verticalCenter
-            width: parent.width - refreshMediaBtn.implicitWidth - Style.space(6)
+            fill: Style.hoverFillFor(root.foreground, Color.accent)
+            currentFill: Style.selectedFillFor(root.foreground, Color.accent)
+
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                onEntered: {
+                    panel.cursorActive = true
+                    panel.focusSection = "media"
+                }
+                onClicked: panel.toggleMediaExpanded()
+            }
+
+            Row {
+                id: headerRow
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(6)
+
+                Text {
+                    text: panel.mediaExpanded ? "󰅀" : "󰅂"
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                PanelSectionHeader {
+                    text: "MEDIA CONTROLS"
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Text {
+                    visible: !panel.mediaExpanded && root.isPlaying && root.trackTitle !== "" && root.trackTitle !== "No active media"
+                    text: "• " + root.trackTitle
+                    color: Qt.darker(root.foreground, 1.4)
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                    width: Math.max(1, parent.parent.width - Style.space(160))
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
         }
 
         PanelActionButton {
             id: refreshMediaBtn
+            visible: panel.mediaExpanded
             iconText: "󰑐"
             tooltipText: "Refresh media player"
             foreground: root.foreground
@@ -57,6 +100,7 @@ Column {
 
     Rectangle {
         id: mediaCard
+        visible: panel.mediaExpanded
         width: parent.width
         implicitHeight: cardContent.implicitHeight + Style.space(16)
         radius: Style.cornerRadius
@@ -70,15 +114,15 @@ Column {
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.margins: Style.space(10)
-            spacing: Style.space(8)
+            spacing: Style.space(10)
 
             Row {
                 width: parent.width
                 spacing: Style.space(10)
 
                 Rectangle {
-                    width: Style.space(36)
-                    height: Style.space(36)
+                    width: Style.space(34)
+                    height: Style.space(34)
                     radius: Style.cornerRadius
                     color: root.isPlaying ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1)
                     anchors.verticalCenter: parent.verticalCenter
@@ -93,7 +137,7 @@ Column {
                 }
 
                 Column {
-                    width: Math.max(1, parent.width - Style.space(46) - (playerTag.visible ? playerTag.implicitWidth + Style.space(8) : 0))
+                    width: Math.max(1, parent.width - Style.space(44) - (playerTag.visible ? playerTag.implicitWidth + Style.space(8) : 0))
                     spacing: Style.space(2)
                     anchors.verticalCenter: parent.verticalCenter
 
@@ -102,7 +146,7 @@ Column {
                         text: root.trackTitle
                         color: root.foreground
                         font.family: root.fontFamily
-                        font.pixelSize: Style.font.body
+                        font.pixelSize: Style.font.bodySmall
                         font.bold: true
                         elide: Text.ElideRight
                     }
@@ -153,55 +197,13 @@ Column {
                 }
             }
 
-            Column {
-                visible: root.trackLength > 0
-                width: parent.width
-                spacing: Style.space(3)
-
-                Rectangle {
-                    width: parent.width
-                    height: Style.space(4)
-                    radius: Style.space(2)
-                    color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
-
-                    Rectangle {
-                        height: parent.height
-                        radius: parent.radius
-                        color: Color.accent
-                        width: Math.max(0, Math.min(parent.width, parent.width * (root.trackPosition / Math.max(1, root.trackLength))))
-                    }
-                }
-
-                Item {
-                    width: parent.width
-                    implicitHeight: posText.implicitHeight
-
-                    Text {
-                        id: posText
-                        anchors.left: parent.left
-                        text: root.service ? root.service.formatMediaTime(root.trackPosition) : "0:00"
-                        color: Qt.darker(root.foreground, 1.4)
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                    }
-
-                    Text {
-                        anchors.right: parent.right
-                        text: root.service ? root.service.formatMediaTime(root.trackLength) : "0:00"
-                        color: Qt.darker(root.foreground, 1.4)
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                    }
-                }
-            }
-
             Row {
                 anchors.horizontalCenter: parent.horizontalCenter
-                spacing: Style.space(12)
+                spacing: Style.space(16)
 
                 CursorSurface {
                     id: prevBtn
-                    implicitWidth: Style.space(34)
+                    implicitWidth: Style.space(36)
                     implicitHeight: Style.space(30)
                     radius: Style.cornerRadius
                     foreground: root.foreground
@@ -233,7 +235,7 @@ Column {
 
                 CursorSurface {
                     id: playPauseBtn
-                    implicitWidth: Style.space(42)
+                    implicitWidth: Style.space(46)
                     implicitHeight: Style.space(30)
                     radius: Style.cornerRadius
                     foreground: root.foreground
@@ -266,7 +268,7 @@ Column {
 
                 CursorSurface {
                     id: nextBtn
-                    implicitWidth: Style.space(34)
+                    implicitWidth: Style.space(36)
                     implicitHeight: Style.space(30)
                     radius: Style.cornerRadius
                     foreground: root.foreground
@@ -294,129 +296,6 @@ Column {
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.body
                     }
-                }
-            }
-
-            Row {
-                visible: root.currentVolume >= 0
-                width: parent.width
-                spacing: Style.space(8)
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: {
-                        if (root.currentVolume === 0) return "󰖁"
-                        if (root.currentVolume <= 33) return "󰕿"
-                        if (root.currentVolume <= 66) return "󰖀"
-                        return "󰕾"
-                    }
-                    color: root.currentVolume === 0 ? Color.urgent : Qt.darker(root.foreground, 1.3)
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                }
-
-                CursorSurface {
-                    id: volDownBtn
-                    implicitWidth: Style.space(26)
-                    implicitHeight: Style.space(22)
-                    radius: Style.cornerRadius
-                    foreground: root.foreground
-                    fill: Style.hoverFillFor(root.foreground, Color.accent)
-                    currentFill: Style.selectedFillFor(root.foreground, Color.accent)
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    PanelToolTip {
-                        visible: volDownMouseArea.containsMouse
-                        text: "Decrease volume"
-                        fontFamily: root.fontFamily
-                    }
-
-                    MouseArea {
-                        id: volDownMouseArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: if (root.service && root.device) root.service.mediaSetVolume(root.device.id, Math.max(0, root.currentVolume - 5))
-                    }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "󰝤"
-                        color: root.foreground
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                    }
-                }
-
-                Rectangle {
-                    id: volBar
-                    width: Math.max(1, parent.width - Style.space(120))
-                    height: Style.space(4)
-                    radius: Style.space(2)
-                    color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    Rectangle {
-                        height: parent.height
-                        radius: parent.radius
-                        color: Color.accent
-                        width: Math.max(0, Math.min(parent.width, parent.width * (root.currentVolume / 100)))
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: function(mouse) {
-                            if (root.service && root.device && volBar.width > 0) {
-                                var newVol = Math.max(0, Math.min(100, Math.round((mouse.x / volBar.width) * 100)))
-                                root.service.mediaSetVolume(root.device.id, newVol)
-                            }
-                        }
-                    }
-                }
-
-                CursorSurface {
-                    id: volUpBtn
-                    implicitWidth: Style.space(26)
-                    implicitHeight: Style.space(22)
-                    radius: Style.cornerRadius
-                    foreground: root.foreground
-                    fill: Style.hoverFillFor(root.foreground, Color.accent)
-                    currentFill: Style.selectedFillFor(root.foreground, Color.accent)
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    PanelToolTip {
-                        visible: volUpMouseArea.containsMouse
-                        text: "Increase volume"
-                        fontFamily: root.fontFamily
-                    }
-
-                    MouseArea {
-                        id: volUpMouseArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: if (root.service && root.device) root.service.mediaSetVolume(root.device.id, Math.min(100, root.currentVolume + 5))
-                    }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "󰝝"
-                        color: root.foreground
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                    }
-                }
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.currentVolume + "%"
-                    color: Qt.darker(root.foreground, 1.3)
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: true
-                    width: Style.space(32)
-                    horizontalAlignment: Text.AlignRight
                 }
             }
         }

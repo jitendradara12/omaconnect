@@ -35,10 +35,18 @@ KeyboardPanel {
     property int selectedIndex: 0
     property int actionSelectedIndex: 0
     property bool cursorActive: false
+    property bool mediaExpanded: false
     property bool commandsExpanded: false
     property int commandSelectedIndex: 0
     property bool networkExpanded: false
     property string unpairConfirmingId: ""
+
+    function toggleMediaExpanded() {
+        mediaExpanded = !mediaExpanded
+        if (mediaExpanded && service && device && device.capabilities && device.capabilities.media) {
+            service.fetchMediaStatus(device.id)
+        }
+    }
 
     function open() {
         if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
@@ -284,6 +292,8 @@ KeyboardPanel {
         } else if (focusSection === "text") {
             if (activeComposer === "text") submitText()
             else openComposer("text")
+        } else if (focusSection === "media" && service && device) {
+            toggleMediaExpanded()
         } else if (focusSection === "commands" && service && device) {
             if (!commandsExpanded) {
                 toggleCommandsExpanded()

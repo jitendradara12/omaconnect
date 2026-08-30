@@ -177,15 +177,6 @@ def format_overview_status(device):
 
 
 
-def format_media_time(ms):
-    if not isinstance(ms, (int, float)) or ms <= 0:
-        return "0:00"
-    total_sec = int(ms // 1000)
-    minutes = total_sec // 60
-    seconds = total_sec % 60
-    return f"{minutes}:{seconds:02d}"
-
-
 class MediaPlayerState:
     def __init__(self, selected_device_id="dev-1"):
         self.selected_device_id = selected_device_id
@@ -194,10 +185,6 @@ class MediaPlayerState:
         self.artist = ""
         self.album = ""
         self.player = ""
-        self.volume = -1
-        self.position = 0
-        self.length = 0
-        self.can_seek = False
         self.loading = False
 
     def select_device(self, new_device_id):
@@ -208,10 +195,6 @@ class MediaPlayerState:
             self.artist = ""
             self.album = ""
             self.player = ""
-            self.volume = -1
-            self.position = 0
-            self.length = 0
-            self.can_seek = False
             self.loading = False
 
     def apply_status(self, data, target_device_id):
@@ -224,10 +207,6 @@ class MediaPlayerState:
             self.artist = ""
             self.album = ""
             self.player = ""
-            self.volume = -1
-            self.position = 0
-            self.length = 0
-            self.can_seek = False
             return True
 
         self.is_playing = bool(data.get("isPlaying", False))
@@ -235,18 +214,10 @@ class MediaPlayerState:
         self.artist = str(data.get("artist") or "")
         self.album = str(data.get("album") or "")
         self.player = str(data.get("player") or "")
-        self.volume = int(data["volume"]) if "volume" in data and isinstance(data["volume"], (int, float)) else -1
-        self.position = int(data["position"]) if "position" in data and isinstance(data["position"], (int, float)) else 0
-        self.length = int(data["length"]) if "length" in data and isinstance(data["length"], (int, float)) else 0
-        self.can_seek = bool(data.get("canSeek", False))
         return True
 
     def build_action_command(self, action_name):
         return ["bash", "scripts/media_control.sh", "action", str(self.selected_device_id), str(action_name)]
-
-    def build_volume_command(self, volume):
-        clamped = max(0, min(100, int(volume)))
-        return ["bash", "scripts/media_control.sh", "volume", str(self.selected_device_id), str(clamped)]
 
     def build_status_command(self):
         return ["bash", "scripts/media_control.sh", "status", str(self.selected_device_id)]
@@ -1666,14 +1637,7 @@ class StateTests(unittest.TestCase):
     self.assertIn("kdeconnect_mprisremote", discovery_source)
     self.assertIn("kdeconnect_mpriscontrol", discovery_source)
 
-  def test_media_player_state_parsing_and_time_formatting(self):
-    self.assertEqual(format_media_time(0), "0:00")
-    self.assertEqual(format_media_time(-100), "0:00")
-    self.assertEqual(format_media_time(65000), "1:05")
-    self.assertEqual(format_media_time(215000), "3:35")
-    self.assertEqual(format_media_time(3600000), "60:00")
-    self.assertEqual(format_media_time(None), "0:00")
-
+  def test_media_player_state_parsing(self):
     state = MediaPlayerState("dev-1")
     raw_status = {
         "isPlaying": True,
@@ -1681,10 +1645,6 @@ class StateTests(unittest.TestCase):
         "artist": "Artist Name",
         "album": "Album Name",
         "player": "Spotify",
-        "volume": 75,
-        "position": 45000,
-        "length": 180000,
-        "canSeek": True,
     }
     applied = state.apply_status(raw_status, "dev-1")
     self.assertTrue(applied)
@@ -1693,20 +1653,15 @@ class StateTests(unittest.TestCase):
     self.assertEqual(state.artist, "Artist Name")
     self.assertEqual(state.album, "Album Name")
     self.assertEqual(state.player, "Spotify")
-    self.assertEqual(state.volume, 75)
-    self.assertEqual(state.position, 45000)
-    self.assertEqual(state.length, 180000)
-    self.assertTrue(state.can_seek)
 
     # Empty payload resets state gracefully
     state.apply_status({}, "dev-1")
     self.assertFalse(state.is_playing)
     self.assertEqual(state.title, "")
-    self.assertEqual(state.volume, -1)
 
   def test_media_player_device_switch_clearing_and_stale_rejection(self):
     state = MediaPlayerState("dev-1")
-    state.apply_status({"isPlaying": True, "title": "Track 1", "volume": 50}, "dev-1")
+    state.apply_status({"isPlaying": True, "title": "Track 1"}, "dev-1")
     self.assertTrue(state.is_playing)
     self.assertEqual(state.title, "Track 1")
 
@@ -1720,16 +1675,11 @@ class StateTests(unittest.TestCase):
     self.assertFalse(stale_applied)
     self.assertEqual(state.title, "")
 
-  def test_media_player_command_generation_and_volume_clamping(self):
+  def test_media_player_command_generation(self):
     state = MediaPlayerState("device-xyz")
     self.assertEqual(state.build_action_command("PlayPause"), ["bash", "scripts/media_control.sh", "action", "device-xyz", "PlayPause"])
     self.assertEqual(state.build_action_command("Next"), ["bash", "scripts/media_control.sh", "action", "device-xyz", "Next"])
     self.assertEqual(state.build_action_command("Previous"), ["bash", "scripts/media_control.sh", "action", "device-xyz", "Previous"])
-
-    self.assertEqual(state.build_volume_command(80), ["bash", "scripts/media_control.sh", "volume", "device-xyz", "80"])
-    self.assertEqual(state.build_volume_command(-10), ["bash", "scripts/media_control.sh", "volume", "device-xyz", "0"])
-    self.assertEqual(state.build_volume_command(150), ["bash", "scripts/media_control.sh", "volume", "device-xyz", "100"])
-
     self.assertEqual(state.build_status_command(), ["bash", "scripts/media_control.sh", "status", "device-xyz"])
 
   def test_media_player_script_argument_validation(self):
@@ -1748,13 +1698,6 @@ class StateTests(unittest.TestCase):
     res = subprocess.run(["bash", str(script_path), "action", "dev bad", "Play"], capture_output=True, check=False)
     self.assertEqual(res.returncode, 64)
 
-    # Invalid volume value exits with code 64
-    res = subprocess.run(["bash", str(script_path), "volume", "dev-1", "200"], capture_output=True, check=False)
-    self.assertEqual(res.returncode, 64)
-
-    res = subprocess.run(["bash", str(script_path), "volume", "dev-1", "not_a_number"], capture_output=True, check=False)
-    self.assertEqual(res.returncode, 64)
-
   def test_media_player_qml_contracts_and_components(self):
     controller_source = (ROOT / "KdeConnectController.qml").read_text()
     self.assertIn("function fetchMediaStatus(id)", controller_source)
@@ -1763,13 +1706,10 @@ class StateTests(unittest.TestCase):
     self.assertIn("function mediaPause(id)", controller_source)
     self.assertIn("function mediaNext(id)", controller_source)
     self.assertIn("function mediaPrevious(id)", controller_source)
-    self.assertIn("function mediaSetVolume(id, volume)", controller_source)
-    self.assertIn("function formatMediaTime(ms)", controller_source)
     self.assertIn("property var mediaState:", controller_source)
     self.assertIn("property bool mediaLoading:", controller_source)
     self.assertIn("id: mediaStatusProcess", controller_source)
     self.assertIn("id: mediaActionProcess", controller_source)
-    self.assertIn("id: mediaVolumeProcess", controller_source)
 
     service_source = (ROOT / "Service.qml").read_text()
     self.assertIn("property alias mediaState: controller.mediaState", service_source)
@@ -1778,22 +1718,23 @@ class StateTests(unittest.TestCase):
     self.assertIn("function mediaPlayPause(id)", service_source)
     self.assertIn("function mediaNext(id)", service_source)
     self.assertIn("function mediaPrevious(id)", service_source)
-    self.assertIn("function mediaSetVolume(id, volume)", service_source)
-    self.assertIn("function formatMediaTime(ms)", service_source)
 
     panel_source = (ROOT / "Panel.qml").read_text()
     self.assertIn("mediaPlayerVisible", panel_source)
+    self.assertIn("mediaExpanded", panel_source)
+    self.assertIn("toggleMediaExpanded", panel_source)
     self.assertIn("showMediaPlayer", panel_source)
     self.assertIn("MediaPlayerSection", panel_source)
 
     media_section = (ROOT / "components" / "MediaPlayerSection.qml").read_text()
     self.assertIn("MEDIA CONTROLS", media_section)
+    self.assertIn("panel.mediaExpanded", media_section)
+    self.assertIn("toggleMediaExpanded", media_section)
     self.assertIn("PanelToolTip", media_section)
+    self.assertIn("refreshMediaBtn", media_section)
     self.assertIn("prevBtn", media_section)
     self.assertIn("playPauseBtn", media_section)
     self.assertIn("nextBtn", media_section)
-    self.assertIn("volDownBtn", media_section)
-    self.assertIn("volUpBtn", media_section)
 
 
 if __name__ == "__main__":
