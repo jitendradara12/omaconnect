@@ -1781,6 +1781,7 @@ class StateTests(unittest.TestCase):
     self.assertIn("function mediaNext(id)", controller_source)
     self.assertIn("function mediaPrevious(id)", controller_source)
     self.assertIn("function mediaSelectPlayer(id, playerName)", controller_source)
+    self.assertIn("function handleMediaProcessExit(code, targetDeviceId)", controller_source)
     self.assertIn("property var mediaState:", controller_source)
     self.assertIn("property bool mediaLoading:", controller_source)
     self.assertIn("id: mediaStatusProcess", controller_source)

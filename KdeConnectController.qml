@@ -816,6 +816,12 @@ Item {
         return true
     }
 
+    function handleMediaProcessExit(code, targetDeviceId) {
+        if (code === 0 && targetDeviceId === root.selectedDeviceId) {
+            root.fetchMediaStatus(targetDeviceId)
+        }
+    }
+
     Process {
         id: scanProcess
         property int targetGeneration: 0
@@ -1088,9 +1094,7 @@ Item {
         id: mediaActionProcess
         property string targetDeviceId: ""
         onExited: function(code) {
-            if (code === 0 && targetDeviceId === root.selectedDeviceId) {
-                root.fetchMediaStatus(targetDeviceId)
-            }
+            root.handleMediaProcessExit(code, targetDeviceId)
         }
     }
 
@@ -1098,9 +1102,7 @@ Item {
         id: mediaPlayerProcess
         property string targetDeviceId: ""
         onExited: function(code) {
-            if (code === 0 && targetDeviceId === root.selectedDeviceId) {
-                root.fetchMediaStatus(targetDeviceId)
-            }
+            root.handleMediaProcessExit(code, targetDeviceId)
         }
     }
 
