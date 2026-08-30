@@ -1739,6 +1739,39 @@ class StateTests(unittest.TestCase):
     res = subprocess.run(["bash", str(script_path), "player", "dev-1", "Spotify\nBad"], capture_output=True, check=False)
     self.assertEqual(res.returncode, 64)
 
+    # Only the actions exposed by this UI are accepted.
+    res = subprocess.run(["bash", str(script_path), "action", "dev-1", "Stop"], capture_output=True, check=False)
+    self.assertEqual(res.returncode, 64)
+
+  def test_media_player_reads_kde_connect_local_album_art(self):
+    script_path = ROOT / "scripts" / "media_control.sh"
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text("\n".join([
+          "#!/usr/bin/env bash",
+          'case "$*" in',
+          "  *localAlbumArtUrl*) printf \"(<'file:///tmp/cover.jpg'>,)\\n\" ;;",
+          "  *playerList*) printf \"(<['Music']>,)\\n\" ;;",
+          "  *isPlaying*) printf \"(<true>,)\\n\" ;;",
+          "  *player*) printf \"(<'Music'>,)\\n\" ;;",
+          "  *title*) printf \"(<'Track'>,)\\n\" ;;",
+          "  *) printf \"(<' '>,)\\n\" ;;",
+          "esac",
+          "",
+      ]))
+      _ = gdbus.chmod(0o755)
+      result = subprocess.run(
+          ["bash", str(script_path), "status", "dev-1"],
+          capture_output=True,
+          text=True,
+          check=False,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(json.loads(result.stdout)["albumArt"], "file:///tmp/cover.jpg")
+
   def test_media_player_qml_contracts_and_components(self):
     controller_source = (ROOT / "KdeConnectController.qml").read_text()
     self.assertIn("function fetchMediaStatus(id)", controller_source)
@@ -1773,7 +1806,7 @@ class StateTests(unittest.TestCase):
     self.assertIn("MediaPlayerSection", panel_source)
 
     media_section = (ROOT / "components" / "MediaPlayerSection.qml").read_text()
-    self.assertIn("MEDIA CONTROLS", media_section)
+    self.assertIn('text: "MEDIA"', media_section)
     self.assertIn("panel.mediaExpanded", media_section)
     self.assertIn("toggleMediaExpanded", media_section)
     self.assertIn("PanelToolTip", media_section)
@@ -1784,6 +1817,8 @@ class StateTests(unittest.TestCase):
     self.assertIn("playerNameText", media_section)
     self.assertNotIn("id: pText", media_section)
     self.assertIn("bgArt", media_section)
+    self.assertIn("localAlbumArtUrl", (ROOT / "scripts" / "media_control.sh").read_text())
+    self.assertNotIn("Style.font.bodyLarge", media_section)
 
   def test_media_player_keyboard_navigation_in_panel(self):
     panel_source = (ROOT / "Panel.qml").read_text()

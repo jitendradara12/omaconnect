@@ -75,8 +75,10 @@ artist = clean_val(get_prop("artist"))
 album = clean_val(get_prop("album"))
 player = clean_val(get_prop("player"))
 
-# Check album art
-album_art = clean_val(get_prop("albumArtUrl"))
+# KDE Connect exposes downloaded artwork as a local file URL.
+album_art = clean_val(get_prop("localAlbumArtUrl"))
+if not album_art:
+    album_art = clean_val(get_prop("albumArtUrl"))
 if not album_art:
     album_art = clean_val(get_prop("artUrl"))
 if not album_art:
@@ -128,7 +130,10 @@ PYEOF
             artist=$(value "$(property artist 2>/dev/null)") || artist=""
             album=$(value "$(property album 2>/dev/null)") || album=""
             player=$(value "$(property player 2>/dev/null)") || player=""
-            album_art=$(value "$(property albumArtUrl 2>/dev/null)") || album_art=""
+            album_art=$(value "$(property localAlbumArtUrl 2>/dev/null)") || album_art=""
+            if [[ -z "$album_art" ]]; then
+                album_art=$(value "$(property albumArtUrl 2>/dev/null)") || album_art=""
+            fi
             if [[ -z "$album_art" ]]; then
                 album_art=$(value "$(property artUrl 2>/dev/null)") || album_art=""
             fi
@@ -143,7 +148,7 @@ PYEOF
         ;;
     action)
         action_name="$argument"
-        [[ -n "$action_name" && "$action_name" =~ ^[A-Za-z]+$ ]] || exit 64
+        [[ "$action_name" =~ ^(PlayPause|Next|Previous)$ ]] || exit 64
         gdbus call --session --dest org.kde.kdeconnect \
             --object-path "$base" \
             --method org.kde.kdeconnect.device.mprisremote.sendAction "$action_name" >/dev/null 2>&1 || exit 69
@@ -151,13 +156,12 @@ PYEOF
     player)
         target_player="$argument"
         [[ -n "$target_player" && "$target_player" != *$'\n'* && "$target_player" != *$'\r'* ]] || exit 64
-        gdbus call --session --dest org.kde.kdeconnect \
-            --object-path "$base" \
-            --method org.kde.kdeconnect.device.mprisremote.setPlayer "$target_player" >/dev/null 2>&1 || \
+        escaped_player=${target_player//\\/\\\\}
+        escaped_player=${escaped_player//\'/\\\'}
         gdbus call --session --dest org.kde.kdeconnect \
             --object-path "$base" \
             --method org.freedesktop.DBus.Properties.Set \
-            "org.kde.kdeconnect.device.mprisremote" "player" "<'$target_player'>" >/dev/null 2>&1 || exit 69
+            "org.kde.kdeconnect.device.mprisremote" "player" "<'$escaped_player'>" >/dev/null 2>&1 || exit 69
         ;;
     *)
         exit 64
