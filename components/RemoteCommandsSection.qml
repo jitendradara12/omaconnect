@@ -26,8 +26,9 @@ Column {
         spacing: Style.space(6)
         CursorSurface {
             width: Math.max(1, parent.width - (panel.commandsExpanded ? refreshCmdBtn.implicitWidth + Style.space(6) : 0))
-            implicitHeight: headerRow.implicitHeight + Style.space(4)
+            implicitHeight: headerRow.implicitHeight + Style.space(6)
             hasCursor: panel.cursorActive && panel.focusSection === "commands" && !panel.commandsExpanded
+            radius: Style.cornerRadius
             foreground: root.foreground
             fill: Style.hoverFillFor(root.foreground, Color.accent)
             currentFill: Style.selectedFillFor(root.foreground, Color.accent)
@@ -109,7 +110,7 @@ Column {
                         panel.focusSection = "commands"
                         panel.commandSelectedIndex = index
                     }
-                    onClicked: if (root.service && root.device) root.service.executeRemoteCommand(root.device.id, modelData.key)
+                    onClicked: if (root.service && root.device && modelData) root.service.executeRemoteCommand(root.device.id, modelData.key)
                 }
                 Row {
                     id: cmdRow
@@ -130,7 +131,7 @@ Column {
 
                     Text {
                         id: cmdBtnText
-                        text: modelData.name
+                        text: modelData ? modelData.name : ""
                         color: root.foreground
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.bodySmall

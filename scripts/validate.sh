@@ -20,11 +20,18 @@ else
     printf '%s\n' "exact Omarchy validator unavailable; skipped"
 fi
 
-if command -v qmllint >/dev/null 2>&1; then
+qmllint_cmd=""
+if [[ -x /usr/lib/qt6/bin/qmllint ]]; then
+    qmllint_cmd=/usr/lib/qt6/bin/qmllint
+elif command -v qmllint >/dev/null 2>&1; then
+    qmllint_cmd="$(command -v qmllint)"
+fi
+
+if [[ -n "$qmllint_cmd" ]]; then
     qml_output="$(mktemp)"
     trap 'rm -f "$qml_output"' EXIT
     set +e
-    omarchy_shell="${OMARCHY_PATH:-}/shell"
+    omarchy_shell="${OMARCHY_PATH:-/usr/share/omarchy}/shell"
     
     qml_files=(Service.qml BarWidget.qml KdeConnectController.qml)
     if [ -f Panel.qml ]; then qml_files+=(Panel.qml); fi
@@ -32,7 +39,7 @@ if command -v qmllint >/dev/null 2>&1; then
         if [ -f "$file" ]; then qml_files+=("$file"); fi
     done
 
-    qmllint -I "$omarchy_shell" \
+    "$qmllint_cmd" -I "$omarchy_shell" \
         -I "$omarchy_shell/Ui" \
         -I "$omarchy_shell/Commons" \
         "${qml_files[@]}" >"$qml_output" 2>&1

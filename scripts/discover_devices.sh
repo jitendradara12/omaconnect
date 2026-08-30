@@ -63,6 +63,20 @@ entries=$(printf '%s' "$ids" | sed -E 's/.*\[//; s/\].*//' | tr ',' '\n' \
     | sed -nE "s/^[[:space:]]*['\"]?([^'\"]+)['\"]?[[:space:]]*$/\1/p")
 [[ -n "$entries" || "$ids" =~ ^\((@as[[:space:]]+)?\[[[:space:]]*\],[[:space:]]*\)$ ]] || exit 70
 
+# KDE Connect owns this list and persists it. Exposing it in the same snapshot
+# lets the UI add Tailscale or other VPN addresses without a second database.
+if custom_raw=$(property "$base" org.kde.kdeconnect.daemon customDevices 2>/dev/null); then
+    printf 'CUSTOM_ADDRESSES_READY\n'
+    custom_entries=$(printf '%s' "$custom_raw" | sed -E 's/.*\[//; s/\].*//' | tr ',' '\n' \
+        | sed -nE "s/^[[:space:]]*['\"]?([^'\"]+)['\"]?[[:space:]]*$/\1/p")
+    while IFS= read -r address; do
+        [[ -n "$address" ]] || continue
+        printf 'CUSTOM_ADDRESS\t%s\n' "$(sanitize_field "$address")"
+    done <<< "$custom_entries"
+else
+    printf 'CUSTOM_ADDRESSES_UNAVAILABLE\n'
+fi
+
 is_address_reachable() {
     local addr=$1
     [[ -n "$addr" ]] || return 1
@@ -106,6 +120,12 @@ while IFS= read -r entry; do
             fi
         fi
     fi
+    pair_requested=$(value "$(property "$path" org.kde.kdeconnect.device isPairRequested 2>/dev/null)") || pair_requested=false
+    pair_requested_by_peer=$(value "$(property "$path" org.kde.kdeconnect.device isPairRequestedByPeer 2>/dev/null)") || pair_requested_by_peer=false
+    verification_key=$(value "$(property "$path" org.kde.kdeconnect.device verificationKey 2>/dev/null)") || verification_key=""
+    [[ "$pair_requested" == true ]] || pair_requested=false
+    [[ "$pair_requested_by_peer" == true ]] || pair_requested_by_peer=false
+
     supported=$(property "$path" org.kde.kdeconnect.device supportedPlugins) || continue
     plugins=
     for plugin in kdeconnect_battery kdeconnect_ping kdeconnect_share kdeconnect_runcommand kdeconnect_findmyphone kdeconnect_clipboard kdeconnect_connectivity_report kdeconnect_sms; do
@@ -132,6 +152,6 @@ while IFS= read -r entry; do
         [[ -n "$type_raw" && "$type_raw" != "null" ]] && net_type=$type_raw
         [[ "$strength_raw" =~ ^[0-9]+$ ]] && net_strength=$strength_raw
     fi
-    printf 'DEVICE\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$(sanitize_field "$id")" "$(sanitize_field "$name")" "$(sanitize_field "$type")" "$paired" "$reachable" "$charge" "$charging" "$plugins" "$(sanitize_field "$net_type")" "$net_strength"
+    printf 'DEVICE\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$(sanitize_field "$id")" "$(sanitize_field "$name")" "$(sanitize_field "$type")" "$paired" "$reachable" "$charge" "$charging" "$plugins" "$(sanitize_field "$net_type")" "$net_strength" "$pair_requested" "$pair_requested_by_peer" "$(sanitize_field "$verification_key")"
 done <<< "$entries"

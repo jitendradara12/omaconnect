@@ -31,25 +31,39 @@ Column {
         Item {
             id: heroLayout
             width: parent.width
-            implicitHeight: Math.max(hero.implicitHeight, refreshButton.implicitHeight)
+            implicitHeight: Math.max(hero.implicitHeight, headerControls.implicitHeight)
 
-            Button {
-                id: refreshButton
+            Row {
+                id: headerControls
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                enabled: !root.service || !root.service.scanning
-                opacity: (root.service && root.service.scanning) ? 0.6 : 1.0
-                iconText: "󰑐"
-                tooltipText: "Refresh"
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                onClicked: if (root.service) root.service.refresh(true)
+                spacing: Style.space(4)
+
+                Button {
+                    id: refreshButton
+                    enabled: !root.service || !root.service.scanning
+                    opacity: (root.service && root.service.scanning) ? 0.6 : 1.0
+                    iconText: "󰑐"
+                    tooltipText: "Refresh"
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    onClicked: if (root.service) root.service.refresh(true)
+                }
+
+                Button {
+                    id: openAppBtn
+                    iconText: "󰒓"
+                    tooltipText: "Open KDE Connect application"
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    onClicked: if (root.service) root.service.openKdeConnectApp()
+                }
             }
 
             Column {
                 id: hero
                 anchors.left: parent.left
-                anchors.right: refreshButton.left
+                anchors.right: headerControls.left
                 anchors.rightMargin: Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(2)
@@ -182,6 +196,62 @@ Column {
         }
     }
 
+    Rectangle {
+        visible: !!(panel && panel.incomingRequest)
+        width: parent.width
+        implicitHeight: incomingContent.implicitHeight + Style.space(16)
+        radius: Style.cornerRadius
+        color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.14)
+        border.color: Color.accent
+        border.width: 1
+
+        Column {
+            id: incomingContent
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.margins: Style.space(8)
+            spacing: Style.space(6)
+
+            Text {
+                width: parent.width
+                text: panel.incomingRequest ? "Pairing request from " + panel.incomingRequest.name : "Pairing request"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+                elide: Text.ElideRight
+            }
+
+            Text {
+                visible: !!(panel.incomingRequest && panel.incomingRequest.verificationKey)
+                width: parent.width
+                text: "Verify on both devices: " + (root.service ? root.service.formatVerificationKey(panel.incomingRequest.verificationKey) : panel.incomingRequest.verificationKey)
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+            }
+
+            Row {
+                spacing: Style.space(6)
+                Button {
+                    text: "Accept"
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    enabled: !!(root.service && panel.incomingRequest && !root.service.pendingPairing[panel.incomingRequest.id])
+                    onClicked: if (root.service && panel.incomingRequest) root.service.acceptPairing(panel.incomingRequest.id)
+                }
+                Button {
+                    text: "Reject"
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    enabled: !!(root.service && panel.incomingRequest && !root.service.pendingPairing[panel.incomingRequest.id])
+                    onClicked: if (root.service && panel.incomingRequest) root.service.rejectPairing(panel.incomingRequest.id)
+                }
+            }
+        }
+    }
+
     PanelSeparator { foreground: root.foreground }
 
     PanelSectionHeader { text: "DEVICES"; foreground: root.foreground; fontFamily: root.fontFamily }
@@ -198,19 +268,20 @@ Column {
         delegate: CursorSurface {
             required property var modelData
             required property int index
-            readonly property string devicePendingState: (root.service && root.service.pendingPairing && root.service.pendingPairing[modelData.id]) ? root.service.pendingPairing[modelData.id] : ""
-            readonly property bool isUnpairConfirming: panel.unpairConfirmingId === modelData.id || devicePendingState === "unpair_confirm"
+            readonly property string devicePendingState: (root.service && root.service.pendingPairing && modelData && root.service.pendingPairing[modelData.id]) ? root.service.pendingPairing[modelData.id] : ""
+            readonly property bool isUnpairConfirming: !!(modelData && (panel.unpairConfirmingId === modelData.id || devicePendingState === "unpair_confirm"))
 
             width: deviceList.width
             implicitHeight: row.implicitHeight + Style.space(8)
             hasCursor: panel.cursorActive && panel.focusSection === "devices" && panel.selectedIndex === index
-            current: root.service && root.service.selectedDeviceId === modelData.id
+            current: !!(root.service && modelData && root.service.selectedDeviceId === modelData.id)
             foreground: root.foreground
             fill: Style.hoverFillFor(root.foreground, Color.accent)
             currentFill: Style.selectedFillFor(root.foreground, Color.accent)
             MouseArea {
                 anchors.fill: parent
                 onClicked: {
+                    if (!modelData) return
                     panel.cursorActive = true
                     panel.focusSection = "devices"
                     panel.selectedIndex = index
@@ -231,8 +302,8 @@ Column {
 
                     Text {
                         id: statusText
-                        text: !modelData.paired ? "" : (!modelData.reachable ? "Offline" : "●")
-                        color: modelData.paired && modelData.reachable ? Color.accent : Qt.darker(root.foreground, 1.5)
+                        text: !modelData || !modelData.paired ? "" : (!modelData.reachable ? "Offline" : "●")
+                        color: (modelData && modelData.paired && modelData.reachable) ? Color.accent : Qt.darker(root.foreground, 1.5)
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption
                         anchors.verticalCenter: parent.verticalCenter
@@ -258,13 +329,13 @@ Column {
                                 text: "Confirm"
                                 foreground: root.foreground
                                 fontFamily: root.fontFamily
-                                onClicked: panel.confirmUnpair(modelData.id)
+                                onClicked: if (modelData) panel.confirmUnpair(modelData.id)
                             }
                             Button {
                                 text: "Cancel"
                                 foreground: root.foreground
                                 fontFamily: root.fontFamily
-                                onClicked: panel.cancelUnpairConfirm(modelData.id)
+                                onClicked: if (modelData) panel.cancelUnpairConfirm(modelData.id)
                             }
                         }
 
@@ -275,7 +346,7 @@ Column {
                             foreground: root.foreground
                             fontFamily: root.fontFamily
                             onClicked: {
-                                if (root.service) {
+                                if (root.service && modelData) {
                                     root.service.setPendingPairing(modelData.id, "")
                                     if (typeof root.service.clearActionState === "function") root.service.clearActionState()
                                 }
@@ -289,25 +360,48 @@ Column {
                             fontFamily: root.fontFamily
                         }
 
-                        Button {
-                            visible: !isUnpairConfirming && !modelData.paired && devicePendingState !== "requesting"
-                            text: "Pair"
-                            foreground: root.foreground
-                            fontFamily: root.fontFamily
-                            onClicked: {
-                                panel.selectDevice(modelData.id)
-                                if (root.service) root.service.pairDevice(modelData.id)
+                        Row {
+                            visible: !isUnpairConfirming && !!modelData && !modelData.paired && modelData.pairRequestedByPeer
+                            spacing: Style.space(4)
+                            Button {
+                                text: "Accept"
+                                foreground: root.foreground
+                                fontFamily: root.fontFamily
+                                enabled: devicePendingState === ""
+                                onClicked: if (root.service && modelData) root.service.acceptPairing(modelData.id)
+                            }
+                            Button {
+                                text: "Reject"
+                                foreground: root.foreground
+                                fontFamily: root.fontFamily
+                                enabled: devicePendingState === ""
+                                onClicked: if (root.service && modelData) root.service.rejectPairing(modelData.id)
                             }
                         }
 
                         Button {
-                            visible: !isUnpairConfirming && modelData.paired && devicePendingState !== "removing"
+                            visible: !isUnpairConfirming && !!modelData && !modelData.paired && !modelData.pairRequestedByPeer && devicePendingState !== "requesting"
+                            text: "Pair"
+                            foreground: root.foreground
+                            fontFamily: root.fontFamily
+                            onClicked: {
+                                if (modelData) {
+                                    panel.selectDevice(modelData.id)
+                                    if (root.service) root.service.pairDevice(modelData.id)
+                                }
+                            }
+                        }
+
+                        Button {
+                            visible: !isUnpairConfirming && !!modelData && modelData.paired && devicePendingState !== "removing"
                             text: "Unpair"
                             foreground: root.foreground
                             fontFamily: root.fontFamily
                             onClicked: {
-                                panel.selectDevice(modelData.id)
-                                panel.requestUnpairConfirm(modelData.id)
+                                if (modelData) {
+                                    panel.selectDevice(modelData.id)
+                                    panel.requestUnpairConfirm(modelData.id)
+                                }
                             }
                         }
                     }
@@ -323,8 +417,8 @@ Column {
 
                     Text {
                         visible: root.showDeviceTypeIcons
-                        text: root.service ? root.service.deviceTypeIcon(modelData.type) : "󰄜"
-                        color: (root.service && root.service.selectedDeviceId === modelData.id) ? Color.accent : Qt.darker(root.foreground, 1.4)
+                        text: (root.service && modelData) ? root.service.deviceTypeIcon(modelData.type) : "󰄜"
+                        color: (root.service && modelData && root.service.selectedDeviceId === modelData.id) ? Color.accent : Qt.darker(root.foreground, 1.4)
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.body
                         anchors.verticalCenter: parent.verticalCenter
@@ -332,7 +426,7 @@ Column {
 
                     Text {
                         id: nameText
-                        text: modelData.name
+                        text: modelData ? modelData.name : ""
                         color: root.foreground
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.body

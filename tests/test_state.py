@@ -26,6 +26,9 @@ def parse_device(line):
         "charging": parts[7] == "true",
         "networkType": net_type,
         "networkStrength": net_strength,
+        "pairRequested": len(parts) > 11 and parts[11] == "true",
+        "pairRequestedByPeer": len(parts) > 12 and parts[12] == "true",
+        "verificationKey": parts[13].strip() if len(parts) > 13 else "",
         "capabilities": {
             "battery": "kdeconnect_battery" in plugins,
             "ping": "kdeconnect_ping" in plugins,
@@ -113,18 +116,15 @@ def format_battery_status(device, show_battery=True, show_network=True):
     if not device or not device.get("reachable", True):
         return ""
     battery_text = ""
-    if show_battery and device.get("capabilities", {}).get("battery"):
+    if show_battery and device.get("capabilities", {}).get("battery") and device.get("battery", -1) >= 0:
         battery = device.get("battery", -1)
-        if battery < 0:
-            battery_text = "Battery unavailable"
+        charging = device.get("charging") or device.get("isCharging")
+        if charging:
+            battery_text = f"{battery}% • Charging"
+        elif battery <= 20:
+            battery_text = f"{battery}% • Low battery"
         else:
-            charging = device.get("charging") or device.get("isCharging")
-            if charging:
-                battery_text = f"{battery}% • Charging"
-            elif battery <= 20:
-                battery_text = f"{battery}% • Low battery"
-            else:
-                battery_text = f"{battery}% • Discharging"
+            battery_text = f"{battery}% • Discharging"
     net_text = format_network_status(device) if show_network else ""
     if battery_text and net_text:
         return f"{battery_text} • {net_text}"
@@ -519,10 +519,20 @@ class StateTests(unittest.TestCase):
         "charging": False,
         "networkType": "",
         "networkStrength": -1,
+        "pairRequested": False,
+        "pairRequestedByPeer": False,
+        "verificationKey": "",
         "capabilities": {"battery": True, "ping": True, "ring": False, "text": True, "clipboard": False, "file": True, "commands": False, "network": False, "sms": False, "pair": True},
     })
 
 
+
+  def test_pairing_metadata_is_parsed_for_incoming_requests(self):
+    line = "DEVICE\tdev-1\tPhone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_ping\t\t-1\ttrue\ttrue\t82C4DD3C"
+    device = parse_device(line)
+    self.assertTrue(device["pairRequested"])
+    self.assertTrue(device["pairRequestedByPeer"])
+    self.assertEqual(device["verificationKey"], "82C4DD3C")
 
   def test_primary_action_capability_gating_and_reachability(self):
     line_full = "DEVICE\tdev-1\tPhone\tphone\ttrue\ttrue\t80\tfalse\tkdeconnect_findmyphone,kdeconnect_clipboard,kdeconnect_share"
@@ -854,14 +864,85 @@ class StateTests(unittest.TestCase):
     self.assertTrue((ROOT / "Panel.qml").exists())
     self.assertTrue(any((ROOT / "components").rglob("*.qml")))
 
+  def test_tailscale_and_custom_address_contracts(self):
+    controller = (ROOT / "KdeConnectController.qml").read_text()
+    discovery = (ROOT / "scripts" / "discover_devices.sh").read_text()
+    network_ui = (ROOT / "components" / "NetworkSection.qml").read_text()
+    address_script = (ROOT / "scripts" / "update_custom_address.sh").read_text()
+
+    panel = (ROOT / "Panel.qml").read_text()
+    bar_widget = (ROOT / "BarWidget.qml").read_text()
+
+    self.assertIn('tailscale status --json', controller)
+    self.assertIn('function parseTailscaleStatus(output)', controller)
+    self.assertIn('function addCustomAddress(address)', controller)
+    self.assertIn('customAddressesReady', controller)
+    self.assertIn('getAddressScriptPath()', controller)
+    self.assertIn('customDevices as', address_script)
+    self.assertLess(address_script.index('Properties.Get'), address_script.index('set-property'))
+    self.assertIn('CUSTOM_ADDRESSES_READY', discovery)
+    self.assertIn('CUSTOM_ADDRESS\\t%s', discovery)
+    self.assertIn('Search peers or enter IP', network_ui)
+    self.assertIn('SAVED ADDRESSES', network_ui)
+    self.assertIn('panel.networkExpanded', network_ui)
+    self.assertIn('property bool networkExpanded', panel)
+    self.assertIn('function toggleNetworkExpanded', panel)
+    self.assertNotIn('root.device.battery + "%"', bar_widget)
+
+  def test_custom_address_update_merges_with_authoritative_dbus_state(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text("#!/usr/bin/env bash\nprintf \"(<['100.64.0.1']>,)\\n\"\n")
+      gdbus.chmod(0o755)
+      busctl = stub_dir / "busctl"
+      busctl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\"\n")
+      busctl.chmod(0o755)
+
+      result = subprocess.run(
+          ["bash", str(ROOT / "scripts" / "update_custom_address.sh"), "add", "100.64.0.2"],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+
+    self.assertEqual(result.returncode, 0, result)
+    self.assertIn("customDevices as 2 100.64.0.1 100.64.0.2", result.stdout)
+
+  def test_incoming_pairing_contracts(self):
+    controller = (ROOT / "KdeConnectController.qml").read_text()
+    ui = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertIn('isPairRequestedByPeer', (ROOT / "scripts" / "discover_devices.sh").read_text())
+    self.assertIn('function acceptPairing(id)', controller)
+    self.assertIn('org.kde.kdeconnect.device.acceptPairing', controller)
+    self.assertIn('function rejectPairing(id)', controller)
+    self.assertIn('org.kde.kdeconnect.device.cancelPairing', controller)
+    self.assertIn('Verify on both devices', ui)
+
   def test_service_forwards_all_controller_actions(self):
     service_source = (ROOT / "Service.qml").read_text()
     self.assertIn("openSmsApp", service_source)
     self.assertIn("controller.openSmsApp", service_source)
+    self.assertIn("openKdeConnectApp", service_source)
+    self.assertIn("controller.openKdeConnectApp", service_source)
     self.assertIn("configureFirewall", service_source)
     self.assertIn("controller.configureFirewall", service_source)
     self.assertIn("setPendingPairing", service_source)
     self.assertIn("deviceNetworkIcon", service_source)
+    self.assertIn("refreshTailscale", service_source)
+    self.assertIn("addCustomAddress", service_source)
+    self.assertIn("acceptPairing", service_source)
+
+  def test_open_kdeconnect_app_contract(self):
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    device_ui = (ROOT / "components" / "DeviceSection.qml").read_text()
+    app_script = (ROOT / "scripts" / "open_app.sh").read_text()
+
+    self.assertIn("function openKdeConnectApp()", controller_source)
+    self.assertIn("getAppScriptPath()", controller_source)
+    self.assertIn("openKdeConnectApp()", device_ui)
+    self.assertIn("Open KDE Connect application", device_ui)
+    self.assertIn("kdeconnect-app", app_script)
 
   def test_confirming_unpair_cannot_follow_a_device_switch(self):
     panel_source = (ROOT / "Panel.qml").read_text()
@@ -906,7 +987,7 @@ class StateTests(unittest.TestCase):
       )
 
       self.assertEqual(result.returncode, 0, result)
-      self.assertEqual(result.stdout, "")
+      self.assertEqual(result.stdout, "CUSTOM_ADDRESSES_READY\n")
 
   def test_sms_launcher_reports_missing_command(self):
     sms_source = (ROOT / "scripts" / "open_sms.sh").read_text()
@@ -1252,6 +1333,12 @@ class StateTests(unittest.TestCase):
     self.assertIn("panel.selectDevice(modelData.id)", device_section_source)
     self.assertIn("panel.cursorActive = true", device_section_source)
     self.assertIn('panel.focusSection = "devices"', device_section_source)
+
+  def test_delegate_null_guards_prevent_typeerror(self):
+    device_section_source = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertIn("root.service && modelData && root.service.selectedDeviceId === modelData.id", device_section_source)
+    self.assertIn("(root.service && modelData) ? root.service.deviceTypeIcon(modelData.type)", device_section_source)
+    self.assertIn("!modelData || !modelData.paired", device_section_source)
 
   def test_panel_select_device_syncs_selected_index(self):
     panel_source = (ROOT / "Panel.qml").read_text()
