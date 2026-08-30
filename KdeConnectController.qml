@@ -66,7 +66,7 @@ Item {
         albumArt: ""
     })
     property bool mediaLoading: false
-    property string mediaTargetId: ""
+    property bool mediaRefreshPending: false
 
     readonly property var reachableDevices: devices.filter(function(device) { return device.reachable })
     readonly property var selectedDevice: deviceById(selectedDeviceId)
@@ -84,6 +84,10 @@ Item {
         return null
     }
 
+    function emptyMediaState() {
+        return ({ isPlaying: false, title: "", artist: "", album: "", player: "", playerList: [], albumArt: "" })
+    }
+
     function selectDevice(id) {
         var next = deviceById(id)
         if (!next) return
@@ -92,8 +96,9 @@ Item {
             actionMessage = ""
             actionError = ""
             fileBusy = false
-            mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "", playerList: [], albumArt: "" }
+            mediaState = emptyMediaState()
             mediaLoading = false
+            mediaRefreshPending = false
             if (mediaStatusProcess.running) mediaStatusProcess.running = false
             if (mediaActionProcess.running) mediaActionProcess.running = false
             if (mediaPlayerProcess.running) mediaPlayerProcess.running = false
@@ -765,11 +770,13 @@ Item {
         var devId = id || selectedDeviceId
         var device = deviceById(devId)
         if (!device || !canAct(devId) || !device.capabilities || !device.capabilities.media) return false
-        if (mediaStatusProcess.running) return false
+        if (mediaStatusProcess.running) {
+            mediaRefreshPending = true
+            return false
+        }
         mediaLoading = true
-        mediaTargetId = String(devId)
+        mediaRefreshPending = false
         mediaStatusProcess.targetDeviceId = String(devId)
-        mediaStatusProcess.targetGeneration = generation
         mediaStatusProcess.command = ["bash", getMediaScriptPath(), "status", String(devId)]
         mediaStatusProcess.running = true
         return true
@@ -1040,13 +1047,17 @@ Item {
     Process {
         id: mediaStatusProcess
         property string targetDeviceId: ""
-        property int targetGeneration: 0
         stdout: StdioCollector { waitForEnd: true }
         stderr: StdioCollector { waitForEnd: true }
         onExited: function(code) {
-            root.mediaLoading = false
-            if (targetDeviceId !== root.selectedDeviceId) return
-            if (code === 0 && stdout.text.trim()) {
+            var currentDevice = root.deviceById(targetDeviceId)
+            var isCurrent = targetDeviceId === root.selectedDeviceId
+                && currentDevice
+                && root.canAct(targetDeviceId)
+                && currentDevice.capabilities
+                && currentDevice.capabilities.media
+
+            if (isCurrent && code === 0 && stdout.text.trim()) {
                 try {
                     var parsed = JSON.parse(stdout.text.trim())
                     root.mediaState = {
@@ -1059,10 +1070,16 @@ Item {
                         albumArt: String(parsed.albumArt || "")
                     }
                 } catch (e) {
-                    root.mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "", playerList: [], albumArt: "" }
+                    root.mediaState = root.emptyMediaState()
                 }
-            } else {
-                root.mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "", playerList: [], albumArt: "" }
+            } else if (isCurrent) {
+                root.mediaState = root.emptyMediaState()
+            }
+
+            root.mediaLoading = false
+            if (root.mediaRefreshPending && root.selectedDeviceId) {
+                root.mediaRefreshPending = false
+                Qt.callLater(function() { root.fetchMediaStatus(root.selectedDeviceId) })
             }
         }
     }

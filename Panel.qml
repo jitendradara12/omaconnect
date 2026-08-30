@@ -36,6 +36,7 @@ KeyboardPanel {
     property int actionSelectedIndex: 0
     property bool cursorActive: false
     property bool mediaExpanded: false
+    property int mediaControlIndex: 1
     property bool commandsExpanded: false
     property int commandSelectedIndex: 0
     property bool networkExpanded: false
@@ -43,6 +44,7 @@ KeyboardPanel {
 
     function toggleMediaExpanded() {
         mediaExpanded = !mediaExpanded
+        mediaControlIndex = 1
         if (mediaExpanded && service && device && device.capabilities && device.capabilities.media) {
             service.fetchMediaStatus(device.id)
         }
@@ -293,7 +295,10 @@ KeyboardPanel {
             if (activeComposer === "text") submitText()
             else openComposer("text")
         } else if (focusSection === "media" && service && device) {
-            toggleMediaExpanded()
+            if (!mediaExpanded) toggleMediaExpanded()
+            else if (mediaControlIndex === 0) service.mediaPrevious(device.id)
+            else if (mediaControlIndex === 2) service.mediaNext(device.id)
+            else service.mediaPlayPause(device.id)
         } else if (focusSection === "commands" && service && device) {
             if (!commandsExpanded) {
                 toggleCommandsExpanded()
@@ -413,7 +418,8 @@ KeyboardPanel {
                     }
                 }
                 else if (root.focusSection === "media") {
-                    if (root.remoteCommandsVisible) root.focusSection = "commands"
+                    if (root.mediaExpanded) root.mediaControlIndex = Math.min(2, root.mediaControlIndex + 1)
+                    else if (root.remoteCommandsVisible) root.focusSection = "commands"
                     else root.focusSection = "devices"
                 }
                 else if (root.focusSection === "commands") root.focusSection = "devices"
@@ -433,12 +439,16 @@ KeyboardPanel {
                     }
                 }
                 else if (root.focusSection === "media") {
-                    var availableMedH = root.availableActions
-                    if (availableMedH.length > 0) {
-                        root.focusSection = "actions"
-                        root.actionSelectedIndex = availableMedH.length - 1
+                    if (root.mediaExpanded) {
+                        root.mediaControlIndex = Math.max(0, root.mediaControlIndex - 1)
                     } else {
-                        root.focusSection = "devices"
+                        var availableMedH = root.availableActions
+                        if (availableMedH.length > 0) {
+                            root.focusSection = "actions"
+                            root.actionSelectedIndex = availableMedH.length - 1
+                        } else {
+                            root.focusSection = "devices"
+                        }
                     }
                 }
                 else if (root.focusSection === "actions") {
