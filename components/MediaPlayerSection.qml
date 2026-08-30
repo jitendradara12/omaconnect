@@ -35,7 +35,7 @@ Column {
         id: collapsedBar
         visible: !panel.mediaExpanded
         width: parent.width
-        implicitHeight: headerRow.implicitHeight + Style.space(6)
+        implicitHeight: Style.space(20)
         hasCursor: panel.cursorActive && panel.focusSection === "media" && !panel.mediaExpanded
         radius: Style.cornerRadius
         foreground: root.foreground
@@ -53,39 +53,40 @@ Column {
             onClicked: panel.toggleMediaExpanded()
         }
 
-        Row {
-            id: headerRow
+        Text {
+            id: musicIcon
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(6)
-
-            Text {
-                text: root.isPlaying ? "󰝚" : "󰎈"
-                color: root.isPlaying ? Color.accent : root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-                width: Math.max(1, parent.width - Style.space(32))
-                text: root.trackTitle + (root.trackArtist ? "  •  " + root.trackArtist : "")
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-                elide: Text.ElideRight
-                anchors.verticalCenter: parent.verticalCenter
-            }
+            text: root.isPlaying ? "󰝚" : "󰎈"
+            color: root.isPlaying ? Color.accent : root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
         }
 
         Text {
+            id: chevronIcon
             anchors.right: parent.right
+            anchors.rightMargin: Style.space(2)
             anchors.verticalCenter: parent.verticalCenter
             text: "󰅀"
             color: Qt.darker(root.foreground, 1.4)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+        }
+
+        Text {
+            id: titleText
+            anchors.left: musicIcon.right
+            anchors.leftMargin: Style.space(6)
+            anchors.right: chevronIcon.left
+            anchors.rightMargin: Style.space(6)
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.trackTitle + (root.trackArtist ? "  •  " + root.trackArtist : "")
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            elide: Text.ElideRight
         }
     }
 
