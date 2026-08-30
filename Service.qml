@@ -36,6 +36,8 @@ Item {
     property alias customAddresses: controller.customAddresses
     property alias customAddressesReady: controller.customAddressesReady
     property alias addressBusy: controller.addressBusy
+    property alias mediaState: controller.mediaState
+    property alias mediaLoading: controller.mediaLoading
 
     function refresh(forceNetwork) { controller.refresh(forceNetwork) }
     function selectDevice(id) { controller.selectDevice(id) }
@@ -69,4 +71,12 @@ Item {
     function deviceBatteryText(device, showBattery, showNetwork) { return controller.deviceBatteryText(device, showBattery, showNetwork) }
     function deviceBatteryIcon(device) { return controller.deviceBatteryIcon(device) }
     function deviceNetworkIcon(device) { return controller.deviceNetworkIcon(device) }
+    function fetchMediaStatus(id) { return controller.fetchMediaStatus(id) }
+    function mediaPlayPause(id) { return controller.mediaPlayPause(id) }
+    function mediaPlay(id) { return controller.mediaPlay(id) }
+    function mediaPause(id) { return controller.mediaPause(id) }
+    function mediaNext(id) { return controller.mediaNext(id) }
+    function mediaPrevious(id) { return controller.mediaPrevious(id) }
+    function mediaSetVolume(id, volume) { return controller.mediaSetVolume(id, volume) }
+    function formatMediaTime(ms) { return controller.formatMediaTime(ms) }
 }

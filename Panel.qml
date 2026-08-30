@@ -25,6 +25,7 @@ KeyboardPanel {
     readonly property string deviceName: device && typeof device.name === "string" ? device.name : "KDE Connect"
     readonly property var incomingRequest: service ? service.incomingPairRequest : null
     readonly property bool remoteCommandsVisible: !!(device && device.paired && device.reachable && device.capabilities && device.capabilities.commands && (!getSetting || getSetting("showRemoteCommands", true)))
+    readonly property bool mediaPlayerVisible: !!(device && device.paired && device.reachable && device.capabilities && device.capabilities.media && (!getSetting || getSetting("showMediaPlayer", true)))
 
     property string activeComposer: "none"
     property string draftPing: ""
@@ -43,6 +44,9 @@ KeyboardPanel {
         if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
         unpairConfirmingId = ""
         opened = true
+        if (service && device && device.paired && device.reachable && device.capabilities && device.capabilities.media) {
+            service.fetchMediaStatus(device.id)
+        }
     }
     function close() {
         if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
@@ -462,6 +466,11 @@ KeyboardPanel {
 
                 ComposerSection {
                     id: composerSection
+                    panel: root
+                }
+
+                MediaPlayerSection {
+                    id: mediaPlayerSection
                     panel: root
                 }
 

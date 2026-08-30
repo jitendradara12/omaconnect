@@ -128,7 +128,7 @@ while IFS= read -r entry; do
 
     supported=$(property "$path" org.kde.kdeconnect.device supportedPlugins) || continue
     plugins=
-    for plugin in kdeconnect_battery kdeconnect_ping kdeconnect_share kdeconnect_runcommand kdeconnect_findmyphone kdeconnect_clipboard kdeconnect_connectivity_report kdeconnect_sms; do
+    for plugin in kdeconnect_battery kdeconnect_ping kdeconnect_share kdeconnect_runcommand kdeconnect_findmyphone kdeconnect_clipboard kdeconnect_connectivity_report kdeconnect_sms kdeconnect_mprisremote kdeconnect_mpriscontrol kdeconnect_mpris; do
         if [[ "$supported" == *"'$plugin'"* || "$supported" == *"<$plugin>"* ]]; then
             plugins="${plugins:+$plugins,}$plugin"
         fi

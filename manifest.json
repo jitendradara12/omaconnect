@@ -28,6 +28,7 @@
     "showNetworkStats": { "type": "boolean", "default": true, "description": "Display cellular network type and signal strength" },
     "showTailscale": { "type": "boolean", "default": true, "description": "Display optional Tailscale and custom address discovery" },
     "showDeviceTypeIcons": { "type": "boolean", "default": true, "description": "Show device type icons" },
+    "showMediaPlayer": { "type": "boolean", "default": true, "description": "Display media player controls for paired devices" },
     "showRemoteCommands": { "type": "boolean", "default": true, "description": "Display remote commands section" },
     "showTroubleshooting": { "type": "boolean", "default": true, "description": "Display setup and firewall helpers when devices are offline" },
     "showActionRing": { "type": "boolean", "default": true, "description": "Include Ring device action" },

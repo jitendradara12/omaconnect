@@ -56,6 +56,19 @@ Item {
     property var customAddresses: []
     property bool customAddressesReady: false
     property bool addressBusy: false
+    property var mediaState: ({
+        isPlaying: false,
+        title: "",
+        artist: "",
+        album: "",
+        player: "",
+        volume: -1,
+        position: 0,
+        length: 0,
+        canSeek: false
+    })
+    property bool mediaLoading: false
+    property string mediaTargetId: ""
 
     readonly property var reachableDevices: devices.filter(function(device) { return device.reachable })
     readonly property var selectedDevice: deviceById(selectedDeviceId)
@@ -81,12 +94,20 @@ Item {
             actionMessage = ""
             actionError = ""
             fileBusy = false
+            mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "", volume: -1, position: 0, length: 0, canSeek: false }
+            mediaLoading = false
+            if (mediaStatusProcess.running) mediaStatusProcess.running = false
+            if (mediaActionProcess.running) mediaActionProcess.running = false
+            if (mediaVolumeProcess.running) mediaVolumeProcess.running = false
         }
         selectedDeviceId = next.id
         remoteCommands = []
         commandTargetId = ""
         commandsLoading = false
         if (commandsProcess.running) commandsProcess.running = false
+        if (next.paired && next.reachable && next.capabilities && next.capabilities.media) {
+            fetchMediaStatus(next.id)
+        }
     }
 
     function clearActionState() {
@@ -452,6 +473,7 @@ Item {
                 commands: hasPlugin("kdeconnect_runcommand"),
                 network: hasPlugin("kdeconnect_connectivity_report"),
                 sms: hasPlugin("kdeconnect_sms"),
+                media: hasPlugin("kdeconnect_mprisremote") || hasPlugin("kdeconnect_mpriscontrol") || hasPlugin("kdeconnect_mpris"),
                 pair: true
             }
         }
@@ -737,6 +759,75 @@ Item {
         return true
     }
 
+    function getMediaScriptPath() {
+        return scriptPath("scripts/media_control.sh")
+    }
+
+    function formatMediaTime(ms) {
+        if (typeof ms !== "number" || isNaN(ms) || ms <= 0) return "0:00"
+        var totalSec = Math.floor(ms / 1000)
+        var min = Math.floor(totalSec / 60)
+        var sec = totalSec % 60
+        return min + ":" + (sec < 10 ? "0" : "") + sec
+    }
+
+    function fetchMediaStatus(id) {
+        var devId = id || selectedDeviceId
+        var device = deviceById(devId)
+        if (!device || !canAct(devId) || !device.capabilities || !device.capabilities.media) return false
+        if (mediaStatusProcess.running) return false
+        mediaLoading = true
+        mediaTargetId = String(devId)
+        mediaStatusProcess.targetDeviceId = String(devId)
+        mediaStatusProcess.targetGeneration = generation
+        mediaStatusProcess.command = ["bash", getMediaScriptPath(), "status", String(devId)]
+        mediaStatusProcess.running = true
+        return true
+    }
+
+    function sendMediaAction(id, actionName) {
+        var devId = id || selectedDeviceId
+        var device = deviceById(devId)
+        if (!device || !canAct(devId) || !device.capabilities || !device.capabilities.media) return false
+        if (mediaActionProcess.running) return false
+        mediaActionProcess.targetDeviceId = String(devId)
+        mediaActionProcess.command = ["bash", getMediaScriptPath(), "action", String(devId), String(actionName)]
+        mediaActionProcess.running = true
+        return true
+    }
+
+    function mediaPlayPause(id) {
+        return sendMediaAction(id, "PlayPause")
+    }
+
+    function mediaPlay(id) {
+        return sendMediaAction(id, "Play")
+    }
+
+    function mediaPause(id) {
+        return sendMediaAction(id, "Pause")
+    }
+
+    function mediaNext(id) {
+        return sendMediaAction(id, "Next")
+    }
+
+    function mediaPrevious(id) {
+        return sendMediaAction(id, "Previous")
+    }
+
+    function mediaSetVolume(id, volume) {
+        var devId = id || selectedDeviceId
+        var device = deviceById(devId)
+        if (!device || !canAct(devId) || !device.capabilities || !device.capabilities.media) return false
+        var val = Math.max(0, Math.min(100, Math.round(Number(volume))))
+        if (mediaVolumeProcess.running) return false
+        mediaVolumeProcess.targetDeviceId = String(devId)
+        mediaVolumeProcess.command = ["bash", getMediaScriptPath(), "volume", String(devId), String(val)]
+        mediaVolumeProcess.running = true
+        return true
+    }
+
     Process {
         id: scanProcess
         property int targetGeneration: 0
@@ -825,6 +916,7 @@ Item {
     }
 
     Timer { id: dbusDebounceTimer; interval: 300; repeat: false; onTriggered: root.refresh() }
+    Timer { id: mediaDebounceTimer; interval: 300; repeat: false; onTriggered: if (root.selectedDeviceId) root.fetchMediaStatus(root.selectedDeviceId) }
 
     Timer {
         id: pairingWatchdogTimer
@@ -853,6 +945,8 @@ Item {
             var value = String(line || "")
             if (value.indexOf("device") !== -1 || value.indexOf("chargeChanged") !== -1 || value.indexOf("stateChanged") !== -1 || value.indexOf("refreshed") !== -1)
                 dbusDebounceTimer.restart()
+            if (value.indexOf("mpris") !== -1 || value.indexOf("PropertiesChanged") !== -1)
+                mediaDebounceTimer.restart()
         } }
         onExited: {
             signalRestart.interval = Math.min(30000, 1000 * Math.pow(2, monitorRestartCount))
@@ -962,8 +1056,60 @@ Item {
         }
     }
 
+    Process {
+        id: mediaStatusProcess
+        property string targetDeviceId: ""
+        property int targetGeneration: 0
+        stdout: StdioCollector { waitForEnd: true }
+        stderr: StdioCollector { waitForEnd: true }
+        onExited: function(code) {
+            root.mediaLoading = false
+            if (targetDeviceId !== root.selectedDeviceId) return
+            if (code === 0 && stdout.text.trim()) {
+                try {
+                    var parsed = JSON.parse(stdout.text.trim())
+                    root.mediaState = {
+                        isPlaying: parsed.isPlaying === true,
+                        title: String(parsed.title || ""),
+                        artist: String(parsed.artist || ""),
+                        album: String(parsed.album || ""),
+                        player: String(parsed.player || ""),
+                        volume: typeof parsed.volume === "number" ? parsed.volume : -1,
+                        position: typeof parsed.position === "number" ? parsed.position : 0,
+                        length: typeof parsed.length === "number" ? parsed.length : 0,
+                        canSeek: parsed.canSeek === true
+                    }
+                } catch (e) {
+                    root.mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "", volume: -1, position: 0, length: 0, canSeek: false }
+                }
+            } else {
+                root.mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "", volume: -1, position: 0, length: 0, canSeek: false }
+            }
+        }
+    }
+
+    Process {
+        id: mediaActionProcess
+        property string targetDeviceId: ""
+        onExited: function(code) {
+            if (code === 0 && targetDeviceId === root.selectedDeviceId) {
+                root.fetchMediaStatus(targetDeviceId)
+            }
+        }
+    }
+
+    Process {
+        id: mediaVolumeProcess
+        property string targetDeviceId: ""
+        onExited: function(code) {
+            if (code === 0 && targetDeviceId === root.selectedDeviceId) {
+                root.fetchMediaStatus(targetDeviceId)
+            }
+        }
+    }
+
     Timer { id: signalRestart; repeat: false; onTriggered: if (!signalProcess.running) signalProcess.running = true }
     Timer { interval: 15000; running: !signalProcess.running; repeat: true; onTriggered: root.refresh() }
     Component.onCompleted: { root.refresh(); root.refreshTailscale(); signalProcess.running = true }
-    Component.onDestruction: { actionDismissTimer.stop(); dbusDebounceTimer.stop(); pairingWatchdogTimer.stop(); signalRestart.stop(); signalProcess.running = false; scanProcess.running = false; commandsProcess.running = false; actionProcess.running = false; pairProcess.running = false; pairResponseProcess.running = false; filePickerProcess.running = false; tailscaleProcess.running = false; addressProcess.running = false; firewallProcess.running = false; installProcess.running = false; appProcess.running = false }
+    Component.onDestruction: { actionDismissTimer.stop(); dbusDebounceTimer.stop(); mediaDebounceTimer.stop(); pairingWatchdogTimer.stop(); signalRestart.stop(); signalProcess.running = false; scanProcess.running = false; commandsProcess.running = false; actionProcess.running = false; pairProcess.running = false; pairResponseProcess.running = false; filePickerProcess.running = false; tailscaleProcess.running = false; addressProcess.running = false; firewallProcess.running = false; installProcess.running = false; appProcess.running = false; mediaStatusProcess.running = false; mediaActionProcess.running = false; mediaVolumeProcess.running = false }
 }
