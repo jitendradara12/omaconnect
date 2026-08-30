@@ -61,7 +61,9 @@ Item {
         title: "",
         artist: "",
         album: "",
-        player: ""
+        player: "",
+        playerList: [],
+        albumArt: ""
     })
     property bool mediaLoading: false
     property string mediaTargetId: ""
@@ -90,7 +92,7 @@ Item {
             actionMessage = ""
             actionError = ""
             fileBusy = false
-            mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "" }
+            mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "", playerList: [], albumArt: "" }
             mediaLoading = false
             if (mediaStatusProcess.running) mediaStatusProcess.running = false
             if (mediaActionProcess.running) mediaActionProcess.running = false
@@ -803,6 +805,17 @@ Item {
         return sendMediaAction(id, "Previous")
     }
 
+    function mediaSelectPlayer(id, playerName) {
+        var devId = id || selectedDeviceId
+        var device = deviceById(devId)
+        if (!device || !canAct(devId) || !device.capabilities || !device.capabilities.media) return false
+        if (mediaActionProcess.running) return false
+        mediaActionProcess.targetDeviceId = String(devId)
+        mediaActionProcess.command = ["bash", getMediaScriptPath(), "player", String(devId), String(playerName)]
+        mediaActionProcess.running = true
+        return true
+    }
+
     Process {
         id: scanProcess
         property int targetGeneration: 0
@@ -1048,13 +1061,15 @@ Item {
                         title: String(parsed.title || ""),
                         artist: String(parsed.artist || ""),
                         album: String(parsed.album || ""),
-                        player: String(parsed.player || "")
+                        player: String(parsed.player || ""),
+                        playerList: Array.isArray(parsed.playerList) ? parsed.playerList : [],
+                        albumArt: String(parsed.albumArt || "")
                     }
                 } catch (e) {
-                    root.mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "" }
+                    root.mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "", playerList: [], albumArt: "" }
                 }
             } else {
-                root.mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "" }
+                root.mediaState = { isPlaying: false, title: "", artist: "", album: "", player: "", playerList: [], albumArt: "" }
             }
         }
     }

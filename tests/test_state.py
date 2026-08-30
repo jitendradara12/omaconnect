@@ -185,6 +185,8 @@ class MediaPlayerState:
         self.artist = ""
         self.album = ""
         self.player = ""
+        self.player_list = []
+        self.album_art = ""
         self.loading = False
 
     def select_device(self, new_device_id):
@@ -195,6 +197,8 @@ class MediaPlayerState:
             self.artist = ""
             self.album = ""
             self.player = ""
+            self.player_list = []
+            self.album_art = ""
             self.loading = False
 
     def apply_status(self, data, target_device_id):
@@ -207,6 +211,8 @@ class MediaPlayerState:
             self.artist = ""
             self.album = ""
             self.player = ""
+            self.player_list = []
+            self.album_art = ""
             return True
 
         self.is_playing = bool(data.get("isPlaying", False))
@@ -214,10 +220,21 @@ class MediaPlayerState:
         self.artist = str(data.get("artist") or "")
         self.album = str(data.get("album") or "")
         self.player = str(data.get("player") or "")
+        self.player_list = list(data.get("playerList") or [])
+        self.album_art = str(data.get("albumArt") or "")
         return True
+
+    def select_player(self, player_name):
+        if player_name in self.player_list:
+            self.player = player_name
+            return True
+        return False
 
     def build_action_command(self, action_name):
         return ["bash", "scripts/media_control.sh", "action", str(self.selected_device_id), str(action_name)]
+
+    def build_player_command(self, player_name):
+        return ["bash", "scripts/media_control.sh", "player", str(self.selected_device_id), str(player_name)]
 
     def build_status_command(self):
         return ["bash", "scripts/media_control.sh", "status", str(self.selected_device_id)]
@@ -1637,31 +1654,45 @@ class StateTests(unittest.TestCase):
     self.assertIn("kdeconnect_mprisremote", discovery_source)
     self.assertIn("kdeconnect_mpriscontrol", discovery_source)
 
-  def test_media_player_state_parsing(self):
+  def test_media_player_state_parsing_with_multi_players_and_album_art(self):
     state = MediaPlayerState("dev-1")
     raw_status = {
         "isPlaying": True,
-        "title": "Song Title",
-        "artist": "Artist Name",
-        "album": "Album Name",
-        "player": "Spotify",
+        "title": "Blinding Lights",
+        "artist": "The Weeknd",
+        "album": "After Hours",
+        "player": "YT Music Morphe",
+        "playerList": ["YT Music Morphe", "Spotify"],
+        "albumArt": "https://example.com/art.jpg",
     }
     applied = state.apply_status(raw_status, "dev-1")
     self.assertTrue(applied)
     self.assertTrue(state.is_playing)
-    self.assertEqual(state.title, "Song Title")
-    self.assertEqual(state.artist, "Artist Name")
-    self.assertEqual(state.album, "Album Name")
+    self.assertEqual(state.title, "Blinding Lights")
+    self.assertEqual(state.artist, "The Weeknd")
+    self.assertEqual(state.album, "After Hours")
+    self.assertEqual(state.player, "YT Music Morphe")
+    self.assertEqual(state.player_list, ["YT Music Morphe", "Spotify"])
+    self.assertEqual(state.album_art, "https://example.com/art.jpg")
+
+    # Player switching
+    switched = state.select_player("Spotify")
+    self.assertTrue(switched)
     self.assertEqual(state.player, "Spotify")
+
+    invalid_switch = state.select_player("NonExistentPlayer")
+    self.assertFalse(invalid_switch)
 
     # Empty payload resets state gracefully
     state.apply_status({}, "dev-1")
     self.assertFalse(state.is_playing)
     self.assertEqual(state.title, "")
+    self.assertEqual(state.player_list, [])
+    self.assertEqual(state.album_art, "")
 
   def test_media_player_device_switch_clearing_and_stale_rejection(self):
     state = MediaPlayerState("dev-1")
-    state.apply_status({"isPlaying": True, "title": "Track 1"}, "dev-1")
+    state.apply_status({"isPlaying": True, "title": "Track 1", "playerList": ["Spotify"]}, "dev-1")
     self.assertTrue(state.is_playing)
     self.assertEqual(state.title, "Track 1")
 
@@ -1669,6 +1700,7 @@ class StateTests(unittest.TestCase):
     state.select_device("dev-2")
     self.assertFalse(state.is_playing)
     self.assertEqual(state.title, "")
+    self.assertEqual(state.player_list, [])
     self.assertEqual(state.selected_device_id, "dev-2")
 
     stale_applied = state.apply_status({"isPlaying": True, "title": "Old Track"}, "dev-1")
@@ -1680,6 +1712,7 @@ class StateTests(unittest.TestCase):
     self.assertEqual(state.build_action_command("PlayPause"), ["bash", "scripts/media_control.sh", "action", "device-xyz", "PlayPause"])
     self.assertEqual(state.build_action_command("Next"), ["bash", "scripts/media_control.sh", "action", "device-xyz", "Next"])
     self.assertEqual(state.build_action_command("Previous"), ["bash", "scripts/media_control.sh", "action", "device-xyz", "Previous"])
+    self.assertEqual(state.build_player_command("Spotify"), ["bash", "scripts/media_control.sh", "player", "device-xyz", "Spotify"])
     self.assertEqual(state.build_status_command(), ["bash", "scripts/media_control.sh", "status", "device-xyz"])
 
   def test_media_player_script_argument_validation(self):
@@ -1698,6 +1731,10 @@ class StateTests(unittest.TestCase):
     res = subprocess.run(["bash", str(script_path), "action", "dev bad", "Play"], capture_output=True, check=False)
     self.assertEqual(res.returncode, 64)
 
+    # Player switch without target player exits with code 64
+    res = subprocess.run(["bash", str(script_path), "player", "dev-1", ""], capture_output=True, check=False)
+    self.assertEqual(res.returncode, 64)
+
   def test_media_player_qml_contracts_and_components(self):
     controller_source = (ROOT / "KdeConnectController.qml").read_text()
     self.assertIn("function fetchMediaStatus(id)", controller_source)
@@ -1706,6 +1743,7 @@ class StateTests(unittest.TestCase):
     self.assertIn("function mediaPause(id)", controller_source)
     self.assertIn("function mediaNext(id)", controller_source)
     self.assertIn("function mediaPrevious(id)", controller_source)
+    self.assertIn("function mediaSelectPlayer(id, playerName)", controller_source)
     self.assertIn("property var mediaState:", controller_source)
     self.assertIn("property bool mediaLoading:", controller_source)
     self.assertIn("id: mediaStatusProcess", controller_source)
@@ -1718,6 +1756,7 @@ class StateTests(unittest.TestCase):
     self.assertIn("function mediaPlayPause(id)", service_source)
     self.assertIn("function mediaNext(id)", service_source)
     self.assertIn("function mediaPrevious(id)", service_source)
+    self.assertIn("function mediaSelectPlayer(id, playerName)", service_source)
 
     panel_source = (ROOT / "Panel.qml").read_text()
     self.assertIn("mediaPlayerVisible", panel_source)
@@ -1731,10 +1770,11 @@ class StateTests(unittest.TestCase):
     self.assertIn("panel.mediaExpanded", media_section)
     self.assertIn("toggleMediaExpanded", media_section)
     self.assertIn("PanelToolTip", media_section)
-    self.assertIn("refreshMediaBtn", media_section)
     self.assertIn("prevBtn", media_section)
     self.assertIn("playPauseBtn", media_section)
     self.assertIn("nextBtn", media_section)
+    self.assertIn("playerControlsRow", media_section)
+    self.assertIn("bgArt", media_section)
 
 
 if __name__ == "__main__":

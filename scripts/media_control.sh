@@ -5,7 +5,7 @@ operation=${1:-}
 device_id=${2:-}
 argument=${3:-}
 
-[[ "$operation" =~ ^(status|action)$ ]] || exit 64
+[[ "$operation" =~ ^(status|action|player)$ ]] || exit 64
 [[ -n "$device_id" && "$device_id" != *$'\t'* && "$device_id" != *$'\n'* && "$device_id" != *' '* && "$device_id" != */* ]] || exit 64
 
 for cmd in gdbus sed tr; do
@@ -22,26 +22,99 @@ property() {
 }
 
 value() {
-    # gdbus quotes strings as <'value'> and scalar values as <value>.
     printf '%s' "$1" | sed -E "s/^\((true|false),\)$/\1/; s/^\(<('([^']|\\\\')*'|[^>]+)>.*$/\1/; s/^<'(.*)'>,?$/\1/; s/^<([^>]*)>,?$/\1/; s/^'(.*)'$/\1/"
 }
 
 case "$operation" in
     status)
-        is_playing=$(value "$(property isPlaying 2>/dev/null)") || is_playing=false
-        title=$(value "$(property title 2>/dev/null)") || title=""
-        artist=$(value "$(property artist 2>/dev/null)") || artist=""
-        album=$(value "$(property album 2>/dev/null)") || album=""
-        player=$(value "$(property player 2>/dev/null)") || player=""
-
-        [[ "$is_playing" == true ]] || is_playing=false
-
         if command -v python3 >/dev/null 2>&1; then
-            python3 -c "import json, sys; print(json.dumps({'isPlaying': sys.argv[1]=='true', 'title': sys.argv[2], 'artist': sys.argv[3], 'album': sys.argv[4], 'player': sys.argv[5]}))" \
-                "$is_playing" "$title" "$artist" "$album" "$player"
+            python3 - "$device_id" << 'PYEOF'
+import sys, json, subprocess, re
+
+device_id = sys.argv[1]
+base = f"/modules/kdeconnect/devices/{device_id}/mprisremote"
+
+def get_prop(name):
+    try:
+        res = subprocess.run([
+            "gdbus", "call", "--session", "--dest", "org.kde.kdeconnect",
+            "--object-path", base, "--method", "org.freedesktop.DBus.Properties.Get",
+            "org.kde.kdeconnect.device.mprisremote", name
+        ], capture_output=True, text=True, timeout=2)
+        if res.returncode == 0:
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+def clean_val(raw):
+    raw = raw.strip()
+    if not raw:
+        return ""
+    # Strip enclosing (<...>,) or (<...>)
+    m = re.search(r"\(<(.+)>\s*,\s*\)", raw, re.DOTALL)
+    if m:
+        val = m.group(1).strip()
+    else:
+        m2 = re.search(r"<\s*['\"]?(.*?)['\"]?\s*>", raw, re.DOTALL)
+        val = m2.group(1).strip() if m2 else raw
+    if val.startswith("'") and val.endswith("'"):
+        val = val[1:-1]
+    return val
+
+is_playing_raw = get_prop("isPlaying")
+is_playing = "<true>" in is_playing_raw or "(true," in is_playing_raw
+
+title = clean_val(get_prop("title"))
+artist = clean_val(get_prop("artist"))
+album = clean_val(get_prop("album"))
+player = clean_val(get_prop("player"))
+
+# Check album art
+album_art = clean_val(get_prop("albumArtUrl"))
+if not album_art:
+    album_art = clean_val(get_prop("artUrl"))
+if not album_art:
+    album_art = clean_val(get_prop("albumArt"))
+
+# Check player list
+player_list_raw = get_prop("playerList")
+player_list = []
+if player_list_raw:
+    # Match strings in array e.g. ['YT Music', 'Spotify']
+    matches = re.findall(r"'([^']*)'", player_list_raw)
+    if matches:
+        player_list = matches
+    else:
+        # Fallback double quotes
+        matches = re.findall(r'"([^"]*)"', player_list_raw)
+        if matches:
+            player_list = matches
+
+if player and player not in player_list:
+    player_list.insert(0, player)
+
+out = {
+    "isPlaying": is_playing,
+    "title": title,
+    "artist": artist,
+    "album": album,
+    "player": player,
+    "playerList": player_list,
+    "albumArt": album_art
+}
+print(json.dumps(out))
+PYEOF
         else
-            printf '{"isPlaying":%s,"title":"%s","artist":"%s","album":"%s","player":"%s"}\n' \
-                "$is_playing" "${title//\"/\\\"}" "${artist//\"/\\\"}" "${album//\"/\\\"}" "${player//\"/\\\"}"
+            is_playing=$(value "$(property isPlaying 2>/dev/null)") || is_playing=false
+            title=$(value "$(property title 2>/dev/null)") || title=""
+            artist=$(value "$(property artist 2>/dev/null)") || artist=""
+            album=$(value "$(property album 2>/dev/null)") || album=""
+            player=$(value "$(property player 2>/dev/null)") || player=""
+            album_art=$(value "$(property albumArtUrl 2>/dev/null)") || album_art=""
+            [[ "$is_playing" == true ]] || is_playing=false
+            printf '{"isPlaying":%s,"title":"%s","artist":"%s","album":"%s","player":"%s","playerList":[],"albumArt":"%s"}\n' \
+                "$is_playing" "${title//\"/\\\"}" "${artist//\"/\\\"}" "${album//\"/\\\"}" "${player//\"/\\\"}" "${album_art//\"/\\\"}"
         fi
         ;;
     action)
@@ -50,6 +123,17 @@ case "$operation" in
         gdbus call --session --dest org.kde.kdeconnect \
             --object-path "$base" \
             --method org.kde.kdeconnect.device.mprisremote.sendAction "$action_name" >/dev/null 2>&1 || exit 69
+        ;;
+    player)
+        target_player="$argument"
+        [[ -n "$target_player" ]] || exit 64
+        gdbus call --session --dest org.kde.kdeconnect \
+            --object-path "$base" \
+            --method org.kde.kdeconnect.device.mprisremote.setPlayer "$target_player" >/dev/null 2>&1 || \
+        gdbus call --session --dest org.kde.kdeconnect \
+            --object-path "$base" \
+            --method org.freedesktop.DBus.Properties.Set \
+            "org.kde.kdeconnect.device.mprisremote" "player" "<'$target_player'>" >/dev/null 2>&1 || exit 69
         ;;
     *)
         exit 64

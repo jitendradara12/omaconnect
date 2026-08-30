@@ -77,4 +77,5 @@ Item {
     function mediaPause(id) { return controller.mediaPause(id) }
     function mediaNext(id) { return controller.mediaNext(id) }
     function mediaPrevious(id) { return controller.mediaPrevious(id) }
+    function mediaSelectPlayer(id, playerName) { return controller.mediaSelectPlayer(id, playerName) }
 }

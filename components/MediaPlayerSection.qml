@@ -26,6 +26,8 @@ Column {
     readonly property string trackArtist: (media && media.artist) ? media.artist : ""
     readonly property string trackAlbum: (media && media.album) ? media.album : ""
     readonly property string trackPlayer: (media && media.player) ? media.player : ""
+    readonly property var playerList: (media && Array.isArray(media.playerList)) ? media.playerList : []
+    readonly property string albumArt: (media && media.albumArt) ? media.albumArt : ""
 
     PanelSeparator { foreground: root.foreground }
 
@@ -34,7 +36,7 @@ Column {
         spacing: Style.space(6)
 
         CursorSurface {
-            width: Math.max(1, parent.width - (panel.mediaExpanded ? refreshMediaBtn.implicitWidth + Style.space(6) : 0))
+            width: parent.width
             implicitHeight: headerRow.implicitHeight + Style.space(6)
             hasCursor: panel.cursorActive && panel.focusSection === "media" && !panel.mediaExpanded
             radius: Style.cornerRadius
@@ -45,6 +47,7 @@ Column {
             MouseArea {
                 anchors.fill: parent
                 hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
                 onEntered: {
                     panel.cursorActive = true
                     panel.focusSection = "media"
@@ -55,6 +58,7 @@ Column {
             Row {
                 id: headerRow
                 anchors.left: parent.left
+                anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(6)
 
@@ -63,6 +67,14 @@ Column {
                     color: root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Text {
+                    text: root.isPlaying ? "󰝚" : "󰎈"
+                    color: root.isPlaying ? Color.accent : root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
@@ -80,21 +92,10 @@ Column {
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
                     elide: Text.ElideRight
-                    width: Math.max(1, parent.parent.width - Style.space(160))
+                    width: Math.max(1, parent.width - Style.space(160))
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
-        }
-
-        PanelActionButton {
-            id: refreshMediaBtn
-            visible: panel.mediaExpanded
-            iconText: "󰑐"
-            tooltipText: "Refresh media player"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            enabled: !root.service || !root.service.mediaLoading
-            onClicked: if (root.service && root.device) root.service.fetchMediaStatus(root.device.id)
         }
     }
 
@@ -102,11 +103,28 @@ Column {
         id: mediaCard
         visible: panel.mediaExpanded
         width: parent.width
-        implicitHeight: cardContent.implicitHeight + Style.space(16)
+        implicitHeight: cardContent.implicitHeight + Style.space(18)
         radius: Style.cornerRadius
         color: Style.hoverFillFor(root.foreground, Color.accent)
         border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
         border.width: 1
+        clip: true
+
+        Image {
+            id: bgArt
+            visible: root.albumArt !== ""
+            anchors.fill: parent
+            source: root.albumArt
+            fillMode: Image.PreserveAspectCrop
+            opacity: 0.16
+            asynchronous: true
+        }
+
+        Rectangle {
+            visible: root.albumArt !== ""
+            anchors.fill: parent
+            color: Qt.rgba(0, 0, 0, 0.4)
+        }
 
         Column {
             id: cardContent
@@ -118,26 +136,10 @@ Column {
 
             Row {
                 width: parent.width
-                spacing: Style.space(10)
-
-                Rectangle {
-                    width: Style.space(34)
-                    height: Style.space(34)
-                    radius: Style.cornerRadius
-                    color: root.isPlaying ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1)
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: root.isPlaying ? "󰝚" : "󰎈"
-                        color: root.isPlaying ? "#000000" : root.foreground
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.title
-                    }
-                }
+                spacing: Style.space(8)
 
                 Column {
-                    width: Math.max(1, parent.width - Style.space(44) - (playerTag.visible ? playerTag.implicitWidth + Style.space(8) : 0))
+                    width: Math.max(1, parent.width - (playerControlsRow.visible ? playerControlsRow.implicitWidth + Style.space(8) : 0))
                     spacing: Style.space(2)
                     anchors.verticalCenter: parent.verticalCenter
 
@@ -146,7 +148,7 @@ Column {
                         text: root.trackTitle
                         color: root.foreground
                         font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
+                        font.pixelSize: Style.font.body
                         font.bold: true
                         elide: Text.ElideRight
                     }
@@ -176,23 +178,43 @@ Column {
                     }
                 }
 
-                Rectangle {
-                    id: playerTag
-                    visible: root.trackPlayer !== ""
+                Row {
+                    id: playerControlsRow
+                    visible: root.playerList.length > 0 || root.trackPlayer !== ""
                     anchors.verticalCenter: parent.verticalCenter
-                    implicitWidth: playerTagText.implicitWidth + Style.space(10)
-                    implicitHeight: playerTagText.implicitHeight + Style.space(4)
-                    radius: Style.cornerRadius
-                    color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+                    spacing: Style.space(4)
 
-                    Text {
-                        id: playerTagText
-                        anchors.centerIn: parent
-                        text: root.trackPlayer
-                        color: Qt.darker(root.foreground, 1.2)
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                        font.bold: true
+                    Repeater {
+                        model: root.playerList.length > 1 ? root.playerList : (root.trackPlayer !== "" ? [root.trackPlayer] : [])
+                        delegate: CursorSurface {
+                            required property string modelData
+                            required property int index
+                            readonly property bool isCurrent: modelData === root.trackPlayer
+                            implicitWidth: pText.implicitWidth + Style.space(8)
+                            implicitHeight: pText.implicitHeight + Style.space(4)
+                            radius: Style.cornerRadius
+                            foreground: root.foreground
+                            fill: isCurrent ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06)
+                            currentFill: Style.selectedFillFor(root.foreground, Color.accent)
+
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: root.playerList.length > 1
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: if (root.service && root.device && modelData) root.service.mediaSelectPlayer(root.device.id, modelData)
+                            }
+
+                            Text {
+                                id: pText
+                                anchors.centerIn: parent
+                                text: modelData
+                                color: isCurrent ? root.foreground : Qt.darker(root.foreground, 1.3)
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                                font.bold: isCurrent
+                            }
+                        }
                     }
                 }
             }
@@ -203,8 +225,8 @@ Column {
 
                 CursorSurface {
                     id: prevBtn
-                    implicitWidth: Style.space(36)
-                    implicitHeight: Style.space(30)
+                    implicitWidth: Style.space(38)
+                    implicitHeight: Style.space(32)
                     radius: Style.cornerRadius
                     foreground: root.foreground
                     fill: Style.hoverFillFor(root.foreground, Color.accent)
@@ -229,14 +251,14 @@ Column {
                         text: "󰒮"
                         color: root.foreground
                         font.family: root.fontFamily
-                        font.pixelSize: Style.font.body
+                        font.pixelSize: Style.font.bodyLarge
                     }
                 }
 
                 CursorSurface {
                     id: playPauseBtn
-                    implicitWidth: Style.space(46)
-                    implicitHeight: Style.space(30)
+                    implicitWidth: Style.space(48)
+                    implicitHeight: Style.space(32)
                     radius: Style.cornerRadius
                     foreground: root.foreground
                     fill: root.isPlaying ? Color.accent : Style.hoverFillFor(root.foreground, Color.accent)
@@ -268,8 +290,8 @@ Column {
 
                 CursorSurface {
                     id: nextBtn
-                    implicitWidth: Style.space(36)
-                    implicitHeight: Style.space(30)
+                    implicitWidth: Style.space(38)
+                    implicitHeight: Style.space(32)
                     radius: Style.cornerRadius
                     foreground: root.foreground
                     fill: Style.hoverFillFor(root.foreground, Color.accent)
@@ -294,7 +316,7 @@ Column {
                         text: "󰒭"
                         color: root.foreground
                         font.family: root.fontFamily
-                        font.pixelSize: Style.font.body
+                        font.pixelSize: Style.font.bodyLarge
                     }
                 }
             }
