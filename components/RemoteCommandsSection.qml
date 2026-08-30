@@ -18,8 +18,12 @@ Column {
     readonly property var device: panel ? panel.device : null
     readonly property color foreground: bar ? bar.foreground : "#ffffff"
     readonly property string fontFamily: bar ? bar.fontFamily : "sans-serif"
+    readonly property bool hasMediaAbove: !!(panel && panel.mediaPlayerVisible)
 
-    PanelSeparator { foreground: root.foreground }
+    PanelSeparator {
+        visible: !root.hasMediaAbove || (panel && panel.mediaExpanded)
+        foreground: root.foreground
+    }
 
     Row {
         width: parent.width

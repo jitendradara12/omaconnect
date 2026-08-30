@@ -20,9 +20,10 @@ Column {
     readonly property var filteredPeers: service ? service.filteredTailscalePeers(addressInput.text).slice(0, 8) : []
 
     readonly property bool hasCommandsAbove: !!(panel && panel.remoteCommandsVisible)
+    readonly property bool hasMediaAbove: !!(panel && panel.mediaPlayerVisible)
 
     PanelSeparator {
-        visible: !root.hasCommandsAbove || (panel && panel.commandsExpanded)
+        visible: (!root.hasCommandsAbove && !root.hasMediaAbove) || (panel && (panel.commandsExpanded || panel.mediaExpanded))
         foreground: root.foreground
     }
 

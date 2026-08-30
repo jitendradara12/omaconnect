@@ -25,6 +25,7 @@ KeyboardPanel {
     readonly property string deviceName: device && typeof device.name === "string" ? device.name : "KDE Connect"
     readonly property var incomingRequest: service ? service.incomingPairRequest : null
     readonly property bool remoteCommandsVisible: !!(device && device.paired && device.reachable && device.capabilities && device.capabilities.commands && (!getSetting || getSetting("showRemoteCommands", true)))
+    readonly property bool mediaPlayerVisible: !!(device && device.paired && device.reachable && device.capabilities && device.capabilities.media && (!getSetting || getSetting("showMediaPlayer", true)))
 
     property string activeComposer: "none"
     property string draftPing: ""
@@ -34,15 +35,28 @@ KeyboardPanel {
     property int selectedIndex: 0
     property int actionSelectedIndex: 0
     property bool cursorActive: false
+    property bool mediaExpanded: true
+    property int mediaControlIndex: 1
     property bool commandsExpanded: false
     property int commandSelectedIndex: 0
     property bool networkExpanded: false
     property string unpairConfirmingId: ""
 
+    function toggleMediaExpanded() {
+        mediaExpanded = !mediaExpanded
+        mediaControlIndex = 1
+        if (mediaExpanded && service && device && device.capabilities && device.capabilities.media) {
+            service.fetchMediaStatus(device.id)
+        }
+    }
+
     function open() {
         if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
         unpairConfirmingId = ""
         opened = true
+        if (service && device && device.paired && device.reachable && device.capabilities && device.capabilities.media) {
+            service.fetchMediaStatus(device.id)
+        }
     }
     function close() {
         if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
@@ -280,6 +294,11 @@ KeyboardPanel {
         } else if (focusSection === "text") {
             if (activeComposer === "text") submitText()
             else openComposer("text")
+        } else if (focusSection === "media" && service && device) {
+            if (!mediaExpanded) toggleMediaExpanded()
+            else if (mediaControlIndex === 0) service.mediaPrevious(device.id)
+            else if (mediaControlIndex === 2) service.mediaNext(device.id)
+            else service.mediaPlayPause(device.id)
         } else if (focusSection === "commands" && service && device) {
             if (!commandsExpanded) {
                 toggleCommandsExpanded()
@@ -324,10 +343,15 @@ KeyboardPanel {
                     else root.focusSection = "devices"
                 }
                 else if (root.focusSection === "commands") root.focusSection = "devices"
+                else if (root.focusSection === "media") {
+                    if (root.remoteCommandsVisible) root.focusSection = "commands"
+                    else root.focusSection = "devices"
+                }
                 else if (root.focusSection === "actions") {
                     var actsD = root.availableActions
                     if (actsD.length > 0 && root.actionSelectedIndex < actsD.length - 1) root.actionSelectedIndex++
-                    else if (root.device && root.device.capabilities && root.device.capabilities.commands) root.focusSection = "commands"
+                    else if (root.mediaPlayerVisible) root.focusSection = "media"
+                    else if (root.remoteCommandsVisible) root.focusSection = "commands"
                     else root.focusSection = "devices"
                 }
                 else root.select(1)
@@ -336,18 +360,31 @@ KeyboardPanel {
                 if (root.focusSection === "commands" && root.commandsExpanded) {
                     if (root.commandSelectedIndex > 0) root.selectCommand(-1)
                     else {
-                        var actsU = root.availableActions
-                        if (actsU.length > 0) {
-                            root.focusSection = "actions"
-                            root.actionSelectedIndex = actsU.length - 1
-                        } else root.focusSection = "devices"
+                        if (root.mediaPlayerVisible) root.focusSection = "media"
+                        else {
+                            var actsU = root.availableActions
+                            if (actsU.length > 0) {
+                                root.focusSection = "actions"
+                                root.actionSelectedIndex = actsU.length - 1
+                            } else root.focusSection = "devices"
+                        }
                     }
                 }
                 else if (root.focusSection === "commands") {
-                    var actsUC = root.availableActions
-                    if (actsUC.length > 0) {
+                    if (root.mediaPlayerVisible) root.focusSection = "media"
+                    else {
+                        var actsUC = root.availableActions
+                        if (actsUC.length > 0) {
+                            root.focusSection = "actions"
+                            root.actionSelectedIndex = actsUC.length - 1
+                        } else root.focusSection = "devices"
+                    }
+                }
+                else if (root.focusSection === "media") {
+                    var actsUM = root.availableActions
+                    if (actsUM.length > 0) {
                         root.focusSection = "actions"
-                        root.actionSelectedIndex = actsUC.length - 1
+                        root.actionSelectedIndex = actsUM.length - 1
                     } else root.focusSection = "devices"
                 }
                 else if (root.focusSection === "actions") {
@@ -362,7 +399,9 @@ KeyboardPanel {
                     if (availableL0.length > 0) {
                         root.focusSection = "actions"
                         root.actionSelectedIndex = 0
-                    } else if (root.device && root.device.capabilities && root.device.capabilities.commands) {
+                    } else if (root.mediaPlayerVisible) {
+                        root.focusSection = "media"
+                    } else if (root.remoteCommandsVisible) {
                         root.focusSection = "commands"
                     }
                 }
@@ -370,22 +409,46 @@ KeyboardPanel {
                     var availableL = root.availableActions
                     if (root.actionSelectedIndex < availableL.length - 1) {
                         root.actionSelectedIndex++
-                    } else if (root.device && root.device.capabilities && root.device.capabilities.commands) {
+                    } else if (root.mediaPlayerVisible) {
+                        root.focusSection = "media"
+                    } else if (root.remoteCommandsVisible) {
                         root.focusSection = "commands"
                     } else {
                         root.focusSection = "devices"
                     }
                 }
+                else if (root.focusSection === "media") {
+                    if (root.mediaExpanded) root.mediaControlIndex = Math.min(2, root.mediaControlIndex + 1)
+                    else if (root.remoteCommandsVisible) root.focusSection = "commands"
+                    else root.focusSection = "devices"
+                }
                 else if (root.focusSection === "commands") root.focusSection = "devices"
             }
             else if (key === "h" || key === "left") {
                 if (root.focusSection === "commands") {
-                    var availableCmdH = root.availableActions
-                    if (availableCmdH.length > 0) {
-                        root.focusSection = "actions"
-                        root.actionSelectedIndex = availableCmdH.length - 1
+                    if (root.mediaPlayerVisible) {
+                        root.focusSection = "media"
                     } else {
-                        root.focusSection = "devices"
+                        var availableCmdH = root.availableActions
+                        if (availableCmdH.length > 0) {
+                            root.focusSection = "actions"
+                            root.actionSelectedIndex = availableCmdH.length - 1
+                        } else {
+                            root.focusSection = "devices"
+                        }
+                    }
+                }
+                else if (root.focusSection === "media") {
+                    if (root.mediaExpanded) {
+                        root.mediaControlIndex = Math.max(0, root.mediaControlIndex - 1)
+                    } else {
+                        var availableMedH = root.availableActions
+                        if (availableMedH.length > 0) {
+                            root.focusSection = "actions"
+                            root.actionSelectedIndex = availableMedH.length - 1
+                        } else {
+                            root.focusSection = "devices"
+                        }
                     }
                 }
                 else if (root.focusSection === "actions") {
@@ -396,7 +459,8 @@ KeyboardPanel {
                     }
                 }
                 else if (root.focusSection === "devices") {
-                    if (root.device && root.device.capabilities && root.device.capabilities.commands) root.focusSection = "commands"
+                    if (root.remoteCommandsVisible) root.focusSection = "commands"
+                    else if (root.mediaPlayerVisible) root.focusSection = "media"
                     else {
                         var availableDevH = root.availableActions
                         if (availableDevH.length > 0) {
@@ -462,6 +526,11 @@ KeyboardPanel {
 
                 ComposerSection {
                     id: composerSection
+                    panel: root
+                }
+
+                MediaPlayerSection {
+                    id: mediaPlayerSection
                     panel: root
                 }
 

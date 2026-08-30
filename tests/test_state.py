@@ -39,6 +39,7 @@ def parse_device(line):
             "commands": "kdeconnect_runcommand" in plugins,
             "network": "kdeconnect_connectivity_report" in plugins,
             "sms": "kdeconnect_sms" in plugins,
+            "media": ("kdeconnect_mprisremote" in plugins) or ("kdeconnect_mpriscontrol" in plugins) or ("kdeconnect_mpris" in plugins),
             "pair": True,
         },
     }
@@ -174,6 +175,69 @@ def format_overview_status(device):
         return "Paired, offline"
     return "Paired & reachable"
 
+
+
+class MediaPlayerState:
+    def __init__(self, selected_device_id="dev-1"):
+        self.selected_device_id = selected_device_id
+        self.is_playing = False
+        self.title = ""
+        self.artist = ""
+        self.album = ""
+        self.player = ""
+        self.player_list = []
+        self.album_art = ""
+        self.loading = False
+
+    def select_device(self, new_device_id):
+        if self.selected_device_id != new_device_id:
+            self.selected_device_id = new_device_id
+            self.is_playing = False
+            self.title = ""
+            self.artist = ""
+            self.album = ""
+            self.player = ""
+            self.player_list = []
+            self.album_art = ""
+            self.loading = False
+
+    def apply_status(self, data, target_device_id):
+        if target_device_id != self.selected_device_id:
+            return False
+        self.loading = False
+        if not data or not isinstance(data, dict):
+            self.is_playing = False
+            self.title = ""
+            self.artist = ""
+            self.album = ""
+            self.player = ""
+            self.player_list = []
+            self.album_art = ""
+            return True
+
+        self.is_playing = bool(data.get("isPlaying", False))
+        self.title = str(data.get("title") or "")
+        self.artist = str(data.get("artist") or "")
+        self.album = str(data.get("album") or "")
+        self.player = str(data.get("player") or "")
+        self.player_list = list(data.get("playerList") or [])
+        self.album_art = str(data.get("albumArt") or "")
+        return True
+
+    def select_player(self, player_name):
+        if player_name in self.player_list:
+            self.player = player_name
+            return True
+        return False
+
+    def build_action_command(self, action_name):
+        return ["bash", "scripts/media_control.sh", "action", str(self.selected_device_id), str(action_name)]
+
+    def build_player_command(self, player_name):
+        return ["bash", "scripts/media_control.sh", "player", str(self.selected_device_id), str(player_name)]
+
+    def build_status_command(self):
+        return ["bash", "scripts/media_control.sh", "status", str(self.selected_device_id)]
 
 
 def accept_completion(target_generation, current_generation, target_id, selected_id):
@@ -486,9 +550,9 @@ class PairingState:
 class StateTests(unittest.TestCase):
   def test_authoritative_snapshot_is_stable_and_capability_aware(self):
     # Full capability set
-    full_line = "DEVICE\tdev-full\tFull Phone\tphone\ttrue\ttrue\t100\ttrue\tkdeconnect_battery,kdeconnect_ping,kdeconnect_share,kdeconnect_runcommand,kdeconnect_findmyphone,kdeconnect_clipboard,kdeconnect_connectivity_report,kdeconnect_sms\t5G\t4"
+    full_line = "DEVICE\tdev-full\tFull Phone\tphone\ttrue\ttrue\t100\ttrue\tkdeconnect_battery,kdeconnect_ping,kdeconnect_share,kdeconnect_runcommand,kdeconnect_findmyphone,kdeconnect_clipboard,kdeconnect_connectivity_report,kdeconnect_sms,kdeconnect_mprisremote\t5G\t4"
     self.assertEqual(parse_device(full_line)["capabilities"], {
-        "battery": True, "ping": True, "ring": True, "text": True, "clipboard": True, "file": True, "commands": True, "network": True, "sms": True, "pair": True
+        "battery": True, "ping": True, "ring": True, "text": True, "clipboard": True, "file": True, "commands": True, "network": True, "sms": True, "media": True, "pair": True
     })
     self.assertEqual(parse_device(full_line)["networkType"], "5G")
     self.assertEqual(parse_device(full_line)["networkStrength"], 4)
@@ -498,13 +562,13 @@ class StateTests(unittest.TestCase):
     # Partial capability set (ring & clipboard only)
     partial_line = "DEVICE\tdev-part\tPart Phone\tphone\ttrue\ttrue\t50\tfalse\tkdeconnect_findmyphone,kdeconnect_clipboard"
     self.assertEqual(parse_device(partial_line)["capabilities"], {
-        "battery": False, "ping": False, "ring": True, "text": False, "clipboard": True, "file": False, "commands": False, "network": False, "sms": False, "pair": True
+        "battery": False, "ping": False, "ring": True, "text": False, "clipboard": True, "file": False, "commands": False, "network": False, "sms": False, "media": False, "pair": True
     })
 
     # Empty / unloaded capability set
     empty_line = "DEVICE\tdev-empty\tEmpty Phone\tphone\tfalse\tfalse\t-1\tfalse\t"
     self.assertEqual(parse_device(empty_line)["capabilities"], {
-        "battery": False, "ping": False, "ring": False, "text": False, "clipboard": False, "file": False, "commands": False, "network": False, "sms": False, "pair": True
+        "battery": False, "ping": False, "ring": False, "text": False, "clipboard": False, "file": False, "commands": False, "network": False, "sms": False, "media": False, "pair": True
     })
 
     # Standard snapshot check
@@ -522,7 +586,7 @@ class StateTests(unittest.TestCase):
         "pairRequested": False,
         "pairRequestedByPeer": False,
         "verificationKey": "",
-        "capabilities": {"battery": True, "ping": True, "ring": False, "text": True, "clipboard": False, "file": True, "commands": False, "network": False, "sms": False, "pair": True},
+        "capabilities": {"battery": True, "ping": True, "ring": False, "text": True, "clipboard": False, "file": True, "commands": False, "network": False, "sms": False, "media": False, "pair": True},
     })
 
 
@@ -1553,6 +1617,8 @@ class StateTests(unittest.TestCase):
     self.assertIn("showBatteryStats", settings)
     self.assertIn("showNetworkStats", settings)
     self.assertIn("showDeviceTypeIcons", settings)
+    self.assertIn("showMediaPlayer", settings)
+    self.assertTrue(settings["showMediaPlayer"]["default"])
     self.assertIn("showRemoteCommands", settings)
     self.assertIn("showTroubleshooting", settings)
     self.assertIn("showActionRing", settings)
@@ -1574,6 +1640,216 @@ class StateTests(unittest.TestCase):
     self.assertIn("text: actionSurface.actionTooltip", action_toolbar)
     self.assertIn("id: actionMouseArea", action_toolbar)
 
+  def test_media_player_capability_detection(self):
+    dev_with_mpris = parse_device("DEVICE\tdev-1\tPhone\tphone\ttrue\ttrue\t80\ttrue\tkdeconnect_battery,kdeconnect_mprisremote")
+    self.assertTrue(dev_with_mpris["capabilities"]["media"])
+
+    dev_with_control = parse_device("DEVICE\tdev-2\tLaptop\tlaptop\ttrue\ttrue\t90\tfalse\tkdeconnect_mpriscontrol")
+    self.assertTrue(dev_with_control["capabilities"]["media"])
+
+    dev_without_media = parse_device("DEVICE\tdev-3\tTablet\ttablet\ttrue\ttrue\t60\tfalse\tkdeconnect_battery,kdeconnect_ping")
+    self.assertFalse(dev_without_media["capabilities"]["media"])
+
+    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
+    self.assertIn("kdeconnect_mprisremote", discovery_source)
+    self.assertIn("kdeconnect_mpriscontrol", discovery_source)
+
+  def test_media_player_state_parsing_with_multi_players_and_album_art(self):
+    state = MediaPlayerState("dev-1")
+    raw_status = {
+        "isPlaying": True,
+        "title": "Blinding Lights",
+        "artist": "The Weeknd",
+        "album": "After Hours",
+        "player": "YT Music Morphe",
+        "playerList": ["YT Music Morphe", "Spotify"],
+        "albumArt": "https://example.com/art.jpg",
+    }
+    applied = state.apply_status(raw_status, "dev-1")
+    self.assertTrue(applied)
+    self.assertTrue(state.is_playing)
+    self.assertEqual(state.title, "Blinding Lights")
+    self.assertEqual(state.artist, "The Weeknd")
+    self.assertEqual(state.album, "After Hours")
+    self.assertEqual(state.player, "YT Music Morphe")
+    self.assertEqual(state.player_list, ["YT Music Morphe", "Spotify"])
+    self.assertEqual(state.album_art, "https://example.com/art.jpg")
+
+    # Player switching
+    switched = state.select_player("Spotify")
+    self.assertTrue(switched)
+    self.assertEqual(state.player, "Spotify")
+
+    invalid_switch = state.select_player("NonExistentPlayer")
+    self.assertFalse(invalid_switch)
+
+    # Empty payload resets state gracefully
+    state.apply_status({}, "dev-1")
+    self.assertFalse(state.is_playing)
+    self.assertEqual(state.title, "")
+    self.assertEqual(state.player_list, [])
+    self.assertEqual(state.album_art, "")
+
+  def test_media_player_device_switch_clearing_and_stale_rejection(self):
+    state = MediaPlayerState("dev-1")
+    state.apply_status({"isPlaying": True, "title": "Track 1", "playerList": ["Spotify"]}, "dev-1")
+    self.assertTrue(state.is_playing)
+    self.assertEqual(state.title, "Track 1")
+
+    # Stale update for dev-1 after selecting dev-2 is ignored
+    state.select_device("dev-2")
+    self.assertFalse(state.is_playing)
+    self.assertEqual(state.title, "")
+    self.assertEqual(state.player_list, [])
+    self.assertEqual(state.selected_device_id, "dev-2")
+
+    stale_applied = state.apply_status({"isPlaying": True, "title": "Old Track"}, "dev-1")
+    self.assertFalse(stale_applied)
+    self.assertEqual(state.title, "")
+
+  def test_media_player_command_generation(self):
+    state = MediaPlayerState("device-xyz")
+    self.assertEqual(state.build_action_command("PlayPause"), ["bash", "scripts/media_control.sh", "action", "device-xyz", "PlayPause"])
+    self.assertEqual(state.build_action_command("Next"), ["bash", "scripts/media_control.sh", "action", "device-xyz", "Next"])
+    self.assertEqual(state.build_action_command("Previous"), ["bash", "scripts/media_control.sh", "action", "device-xyz", "Previous"])
+    self.assertEqual(state.build_player_command("Spotify"), ["bash", "scripts/media_control.sh", "player", "device-xyz", "Spotify"])
+    self.assertEqual(state.build_status_command(), ["bash", "scripts/media_control.sh", "status", "device-xyz"])
+
+  def test_media_player_script_argument_validation(self):
+    script_path = ROOT / "scripts" / "media_control.sh"
+    self.assertTrue(script_path.is_file())
+    self.assertTrue(os.access(script_path, os.X_OK))
+
+    # Invalid operation exits with code 64
+    res = subprocess.run(["bash", str(script_path), "invalid_op", "dev-1"], capture_output=True, check=False)
+    self.assertEqual(res.returncode, 64)
+
+    # Invalid device id with injection/spaces/slashes exits with code 64
+    res = subprocess.run(["bash", str(script_path), "action", "dev/bad", "Play"], capture_output=True, check=False)
+    self.assertEqual(res.returncode, 64)
+
+    res = subprocess.run(["bash", str(script_path), "action", "dev bad", "Play"], capture_output=True, check=False)
+    self.assertEqual(res.returncode, 64)
+
+    # Player switch without target player exits with code 64
+    res = subprocess.run(["bash", str(script_path), "player", "dev-1", ""], capture_output=True, check=False)
+    self.assertEqual(res.returncode, 64)
+
+    # Player switch with newline or carriage return exits with code 64
+    res = subprocess.run(["bash", str(script_path), "player", "dev-1", "Spotify\nBad"], capture_output=True, check=False)
+    self.assertEqual(res.returncode, 64)
+
+    # Only the actions exposed by this UI are accepted.
+    res = subprocess.run(["bash", str(script_path), "action", "dev-1", "Stop"], capture_output=True, check=False)
+    self.assertEqual(res.returncode, 64)
+
+  def test_media_player_reads_kde_connect_local_album_art(self):
+    script_path = ROOT / "scripts" / "media_control.sh"
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text("\n".join([
+          "#!/usr/bin/env bash",
+          'case "$*" in',
+          "  *localAlbumArtUrl*) printf \"(<'file:///tmp/cover.jpg'>,)\\n\" ;;",
+          "  *playerList*) printf \"(<['Music']>,)\\n\" ;;",
+          "  *isPlaying*) printf \"(<true>,)\\n\" ;;",
+          "  *player*) printf \"(<'Music'>,)\\n\" ;;",
+          "  *title*) printf \"(<'Track'>,)\\n\" ;;",
+          "  *) printf \"(<' '>,)\\n\" ;;",
+          "esac",
+          "",
+      ]))
+      _ = gdbus.chmod(0o755)
+      result = subprocess.run(
+          ["bash", str(script_path), "status", "dev-1"],
+          capture_output=True,
+          text=True,
+          check=False,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(json.loads(result.stdout)["albumArt"], "file:///tmp/cover.jpg")
+
+  def test_media_player_qml_contracts_and_components(self):
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    self.assertIn("function fetchMediaStatus(id)", controller_source)
+    self.assertIn("function mediaPlayPause(id)", controller_source)
+    self.assertNotIn("function mediaPlay(id)", controller_source)
+    self.assertNotIn("function mediaPause(id)", controller_source)
+    self.assertIn("function mediaNext(id)", controller_source)
+    self.assertIn("function mediaPrevious(id)", controller_source)
+    self.assertIn("function mediaSelectPlayer(id, playerName)", controller_source)
+    self.assertIn("function handleMediaProcessExit(code, targetDeviceId)", controller_source)
+    self.assertIn("property var mediaState:", controller_source)
+    self.assertIn("property bool mediaLoading:", controller_source)
+    self.assertIn("id: mediaStatusProcess", controller_source)
+    self.assertIn("id: mediaActionProcess", controller_source)
+    self.assertIn("id: mediaPlayerProcess", controller_source)
+
+    service_source = (ROOT / "Service.qml").read_text()
+    self.assertIn("property alias mediaState: controller.mediaState", service_source)
+    self.assertIn("property alias mediaLoading: controller.mediaLoading", service_source)
+    self.assertIn("function fetchMediaStatus(id)", service_source)
+    self.assertIn("function mediaPlayPause(id)", service_source)
+    self.assertNotIn("function mediaPlay(id)", service_source)
+    self.assertNotIn("function mediaPause(id)", service_source)
+    self.assertIn("function mediaNext(id)", service_source)
+    self.assertIn("function mediaPrevious(id)", service_source)
+    self.assertIn("function mediaSelectPlayer(id, playerName)", service_source)
+
+    panel_source = (ROOT / "Panel.qml").read_text()
+    self.assertIn("mediaPlayerVisible", panel_source)
+    self.assertIn("mediaExpanded", panel_source)
+    self.assertIn("toggleMediaExpanded", panel_source)
+    self.assertIn("showMediaPlayer", panel_source)
+    self.assertIn("MediaPlayerSection", panel_source)
+
+    media_section = (ROOT / "components" / "MediaPlayerSection.qml").read_text()
+    self.assertIn("collapsedBar", media_section)
+    self.assertIn("minimizeBtn", media_section)
+    self.assertIn("visible: !panel.mediaExpanded", media_section)
+    self.assertIn("visible: panel.mediaExpanded", media_section)
+    self.assertIn("panel.mediaExpanded", media_section)
+    self.assertIn("toggleMediaExpanded", media_section)
+    self.assertIn("PanelToolTip", media_section)
+    self.assertIn("prevBtn", media_section)
+    self.assertIn("playPauseBtn", media_section)
+    self.assertIn("nextBtn", media_section)
+    self.assertIn("playerControlsRow", media_section)
+    self.assertIn("playerNameText", media_section)
+    self.assertNotIn("id: pText", media_section)
+    self.assertIn("bgArt", media_section)
+    self.assertIn("backdropArt", media_section)
+    self.assertIn("localAlbumArtUrl", (ROOT / "scripts" / "media_control.sh").read_text())
+    self.assertNotIn("Style.font.bodyLarge", media_section)
+    self.assertIn("musicIcon", media_section)
+    self.assertIn("chevronIcon", media_section)
+    self.assertIn("titleText", media_section)
+    self.assertIn("anchors.left: parent.left", media_section)
+    self.assertIn("anchors.right: parent.right", media_section)
+    self.assertIn("anchors.leftMargin: Style.space(6)", media_section)
+    self.assertIn("anchors.rightMargin: Style.space(6)", media_section)
+    self.assertIn("anchors.rightMargin: Style.space(2)", media_section)
+    self.assertIn("implicitHeight: Style.space(20)", media_section)
+    self.assertNotIn("Math.max(1, parent.width - Style.space(32))", media_section)
+
+  def test_media_player_keyboard_navigation_in_panel(self):
+    panel_source = (ROOT / "Panel.qml").read_text()
+    self.assertIn('focusSection === "media"', panel_source)
+    self.assertIn('root.focusSection = "media"', panel_source)
+    self.assertIn('toggleMediaExpanded()', panel_source)
+
+  def test_media_player_readme_and_manifest_accuracy(self):
+    readme_source = (ROOT / "README.md").read_text()
+    self.assertIn("player switching", readme_source)
+    self.assertNotIn("volume", readme_source)
+
+    manifest_source = (ROOT / "manifest.json").read_text()
+    self.assertIn("showMediaPlayer", manifest_source)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+

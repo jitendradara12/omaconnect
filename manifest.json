@@ -4,7 +4,7 @@
   "name": "OmaConnect",
   "version": "1.3.0",
   "author": "Jitendra Dara (jitendradara12)",
-  "description": "Seamless KDE Connect integration for Omarchy: Tailscale discovery, pairing, SMS, battery stats, clipboard sync, file sharing, and remote commands.",
+  "description": "Seamless KDE Connect integration for Omarchy: Tailscale discovery, pairing, SMS, battery stats, clipboard sync, file sharing, remote commands, and media controls.",
   "license": "MIT",
   "homepage": "https://github.com/jitendradara12/omaconnect",
   "repository": "https://github.com/jitendradara12/omaconnect",
@@ -18,7 +18,7 @@
   },
   "barWidget": {
     "displayName": "OmaConnect",
-    "description": "KDE Connect devices, Tailscale discovery, pairing, battery, and remote actions",
+    "description": "KDE Connect devices, Tailscale discovery, pairing, battery, media controls, and remote actions",
     "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "right"
@@ -28,6 +28,7 @@
     "showNetworkStats": { "type": "boolean", "default": true, "description": "Display cellular network type and signal strength" },
     "showTailscale": { "type": "boolean", "default": true, "description": "Display optional Tailscale and custom address discovery" },
     "showDeviceTypeIcons": { "type": "boolean", "default": true, "description": "Show device type icons" },
+    "showMediaPlayer": { "type": "boolean", "default": true, "description": "Display media player controls for paired devices" },
     "showRemoteCommands": { "type": "boolean", "default": true, "description": "Display remote commands section" },
     "showTroubleshooting": { "type": "boolean", "default": true, "description": "Display setup and firewall helpers when devices are offline" },
     "showActionRing": { "type": "boolean", "default": true, "description": "Include Ring device action" },
