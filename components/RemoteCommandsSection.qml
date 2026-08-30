@@ -11,7 +11,7 @@ Column {
 
     width: parent ? parent.width : 0
     spacing: Style.space(6)
-    visible: !!(panel && panel.device && panel.device.paired && panel.device.reachable && panel.device.capabilities && panel.device.capabilities.commands && (!panel.getSetting || panel.getSetting("showRemoteCommands", true)))
+    visible: !!(panel && panel.remoteCommandsVisible)
 
     readonly property var bar: panel ? panel.bar : null
     readonly property var service: panel ? panel.service : null

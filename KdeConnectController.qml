@@ -59,6 +59,12 @@ Item {
 
     readonly property var reachableDevices: devices.filter(function(device) { return device.reachable })
     readonly property var selectedDevice: deviceById(selectedDeviceId)
+    readonly property var incomingPairRequest: {
+        for (var i = 0; i < devices.length; i++) {
+            if (devices[i].pairRequestedByPeer) return devices[i]
+        }
+        return null
+    }
     readonly property bool connected: reachableDevices.length > 0
 
     function deviceById(id) {
@@ -168,30 +174,25 @@ Item {
         })
     }
 
+    function extractIPv4(addresses) {
+        var list = addresses || []
+        for (var i = 0; i < list.length; i++) {
+            if (/^\d+\.\d+\.\d+\.\d+$/.test(String(list[i]))) return String(list[i])
+        }
+        return ""
+    }
+
     function parseTailscaleStatus(output) {
         var data = JSON.parse(String(output || "{}"))
         var backend = String(data.BackendState || "")
         var running = backend === "Running"
-        var local = ""
         var localAddresses = (data.Self && data.Self.TailscaleIPs) || data.TailscaleIPs || []
-        for (var i = 0; i < localAddresses.length; i++) {
-            if (/^\d+\.\d+\.\d+\.\d+$/.test(String(localAddresses[i]))) {
-                local = String(localAddresses[i])
-                break
-            }
-        }
+        var local = extractIPv4(localAddresses)
         var peers = []
         var rawPeers = data.Peer || {}
         Object.keys(rawPeers).forEach(function(key) {
             var raw = rawPeers[key] || {}
-            var addresses = raw.TailscaleIPs || []
-            var address = ""
-            for (var j = 0; j < addresses.length; j++) {
-                if (/^\d+\.\d+\.\d+\.\d+$/.test(String(addresses[j]))) {
-                    address = String(addresses[j])
-                    break
-                }
-            }
+            var address = extractIPv4(raw.TailscaleIPs || [])
             if (!address) return
             var dns = String(raw.DNSName || "").replace(/\.$/, "")
             var host = String(raw.HostName || "")
@@ -699,34 +700,27 @@ Item {
         return true
     }
 
-    function acceptPairing(id) {
+    function respondToPairingRequest(id, accept) {
         var device = deviceById(id)
         if (!device || !device.pairRequestedByPeer || pairResponseProcess.running || pairProcess.running) return false
         selectDevice(id)
-        setPendingPairing(id, "accepting")
+        setPendingPairing(id, accept ? "accepting" : "rejecting")
         pairResponseProcess.targetDeviceId = String(id)
-        pairResponseProcess.accepting = true
-        pairResponseProcess.command = ["gdbus", "call", "--session", "--dest", "org.kde.kdeconnect", "--object-path", "/modules/kdeconnect/devices/" + String(id), "--method", "org.kde.kdeconnect.device.acceptPairing"]
+        pairResponseProcess.accepting = accept
+        pairResponseProcess.command = ["gdbus", "call", "--session", "--dest", "org.kde.kdeconnect", "--object-path", "/modules/kdeconnect/devices/" + String(id), "--method", accept ? "org.kde.kdeconnect.device.acceptPairing" : "org.kde.kdeconnect.device.cancelPairing"]
         actionState = "running"
-        actionMessage = "Accepting pairing request"
+        actionMessage = accept ? "Accepting pairing request" : "Rejecting pairing request"
         actionError = ""
         pairResponseProcess.running = true
         return true
     }
 
+    function acceptPairing(id) {
+        return respondToPairingRequest(id, true)
+    }
+
     function rejectPairing(id) {
-        var device = deviceById(id)
-        if (!device || !device.pairRequestedByPeer || pairResponseProcess.running || pairProcess.running) return false
-        selectDevice(id)
-        setPendingPairing(id, "rejecting")
-        pairResponseProcess.targetDeviceId = String(id)
-        pairResponseProcess.accepting = false
-        pairResponseProcess.command = ["gdbus", "call", "--session", "--dest", "org.kde.kdeconnect", "--object-path", "/modules/kdeconnect/devices/" + String(id), "--method", "org.kde.kdeconnect.device.cancelPairing"]
-        actionState = "running"
-        actionMessage = "Rejecting pairing request"
-        actionError = ""
-        pairResponseProcess.running = true
-        return true
+        return respondToPairingRequest(id, false)
     }
 
     function unpairDevice(id) {

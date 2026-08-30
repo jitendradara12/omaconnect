@@ -23,11 +23,8 @@ KeyboardPanel {
     readonly property var service: hostWidget && hostWidget.service ? hostWidget.service : (bar && bar.shell && typeof bar.shell.serviceFor === "function" ? bar.shell.serviceFor("omaconnect") : null)
     readonly property var device: service ? service.selectedDevice : null
     readonly property string deviceName: device && typeof device.name === "string" ? device.name : "KDE Connect"
-    readonly property var incomingRequest: {
-        var list = service ? service.devices : []
-        for (var i = 0; i < list.length; i++) if (list[i].pairRequestedByPeer) return list[i]
-        return null
-    }
+    readonly property var incomingRequest: service ? service.incomingPairRequest : null
+    readonly property bool remoteCommandsVisible: !!(device && device.paired && device.reachable && device.capabilities && device.capabilities.commands && (!getSetting || getSetting("showRemoteCommands", true)))
 
     property string activeComposer: "none"
     property string draftPing: ""

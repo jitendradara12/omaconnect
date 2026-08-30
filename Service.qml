@@ -21,6 +21,7 @@ Item {
     property alias reachableDevices: controller.reachableDevices
     property alias selectedDeviceId: controller.selectedDeviceId
     property alias selectedDevice: controller.selectedDevice
+    property alias incomingPairRequest: controller.incomingPairRequest
     property alias remoteCommands: controller.remoteCommands
     property alias commandsLoading: controller.commandsLoading
     property alias pendingPairing: controller.pendingPairing

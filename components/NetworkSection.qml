@@ -19,7 +19,7 @@ Column {
     readonly property string fontFamily: bar ? bar.fontFamily : "sans-serif"
     readonly property var filteredPeers: service ? service.filteredTailscalePeers(addressInput.text).slice(0, 8) : []
 
-    readonly property bool hasCommandsAbove: !!(panel && panel.device && panel.device.paired && panel.device.reachable && panel.device.capabilities && panel.device.capabilities.commands && (!panel.getSetting || panel.getSetting("showRemoteCommands", true)))
+    readonly property bool hasCommandsAbove: !!(panel && panel.remoteCommandsVisible)
 
     PanelSeparator {
         visible: !root.hasCommandsAbove || (panel && panel.commandsExpanded)
