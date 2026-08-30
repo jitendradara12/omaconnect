@@ -154,8 +154,12 @@ PYEOF
                     players_json="[$json_arr]"
                 fi
             fi
-            if [[ "$players_json" == "[]" && -n "$player" ]]; then
-                players_json="[\"${player//\"/\\\"}\"]"
+            if [[ -n "$player" && "$players_json" != *"\"$player\""* ]]; then
+                if [[ "$players_json" == "[]" ]]; then
+                    players_json="[\"${player//\"/\\\"}\"]"
+                else
+                    players_json="[\"${player//\"/\\\"}\",${players_json:1}"
+                fi
             fi
             gdbus call --session --dest org.kde.kdeconnect --object-path "$base" --method org.kde.kdeconnect.device.mprisremote.requestPlayerList >/dev/null 2>&1 || true
             [[ "$is_playing" == true ]] || is_playing=false
