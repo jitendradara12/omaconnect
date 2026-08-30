@@ -1806,7 +1806,8 @@ class StateTests(unittest.TestCase):
     self.assertIn("MediaPlayerSection", panel_source)
 
     media_section = (ROOT / "components" / "MediaPlayerSection.qml").read_text()
-    self.assertIn('text: "MEDIA"', media_section)
+    self.assertIn("collapsedBar", media_section)
+    self.assertIn("minimizeBtn", media_section)
     self.assertIn("panel.mediaExpanded", media_section)
     self.assertIn("toggleMediaExpanded", media_section)
     self.assertIn("PanelToolTip", media_section)
@@ -1817,6 +1818,7 @@ class StateTests(unittest.TestCase):
     self.assertIn("playerNameText", media_section)
     self.assertNotIn("id: pText", media_section)
     self.assertIn("bgArt", media_section)
+    self.assertIn("backdropArt", media_section)
     self.assertIn("localAlbumArtUrl", (ROOT / "scripts" / "media_control.sh").read_text())
     self.assertNotIn("Style.font.bodyLarge", media_section)
 
