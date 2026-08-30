@@ -29,13 +29,6 @@ Column {
     readonly property var playerList: (media && Array.isArray(media.playerList)) ? media.playerList : []
     readonly property string albumArt: (media && media.albumArt) ? media.albumArt : ""
 
-    function cyclePlayer() {
-        if (!root.service || !root.device || root.playerList.length < 2) return
-        var currentIndex = root.playerList.indexOf(root.trackPlayer)
-        var nextIndex = (currentIndex + 1) % root.playerList.length
-        root.service.mediaSelectPlayer(root.device.id, root.playerList[nextIndex])
-    }
-
     PanelSeparator { foreground: root.foreground }
 
     CursorSurface {
@@ -110,6 +103,24 @@ Column {
         color: Style.hoverFillFor(root.foreground, Color.accent)
         border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
         border.width: 1
+        clip: true
+
+        Image {
+            id: backdropArt
+            anchors.fill: parent
+            source: root.albumArt
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            smooth: true
+            opacity: 0.14
+            visible: status === Image.Ready
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            visible: backdropArt.visible
+            color: Qt.rgba(0, 0, 0, 0.35)
+        }
 
         Column {
             id: cardContent

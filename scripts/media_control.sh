@@ -140,10 +140,27 @@ PYEOF
             if [[ -z "$album_art" ]]; then
                 album_art=$(value "$(property albumArt 2>/dev/null)") || album_art=""
             fi
+            raw_players=$(property playerList 2>/dev/null) || raw_players=""
+            players_json="[]"
+            if [[ -n "$raw_players" ]]; then
+                p_items=$(printf '%s' "$raw_players" | grep -o -E "'[^']+'|\"[^\"]+\"" | tr -d "'\"" || true)
+                if [[ -n "$p_items" ]]; then
+                    json_arr=""
+                    while IFS= read -r p; do
+                        [[ -n "$p" ]] || continue
+                        if [[ -n "$json_arr" ]]; then json_arr="$json_arr,"; fi
+                        json_arr="$json_arr\"${p//\"/\\\"}\""
+                    done <<< "$p_items"
+                    players_json="[$json_arr]"
+                fi
+            fi
+            if [[ "$players_json" == "[]" && -n "$player" ]]; then
+                players_json="[\"${player//\"/\\\"}\"]"
+            fi
             gdbus call --session --dest org.kde.kdeconnect --object-path "$base" --method org.kde.kdeconnect.device.mprisremote.requestPlayerList >/dev/null 2>&1 || true
             [[ "$is_playing" == true ]] || is_playing=false
-            printf '{"isPlaying":%s,"title":"%s","artist":"%s","album":"%s","player":"%s","playerList":[],"albumArt":"%s"}\n' \
-                "$is_playing" "${title//\"/\\\"}" "${artist//\"/\\\"}" "${album//\"/\\\"}" "${player//\"/\\\"}" "${album_art//\"/\\\"}"
+            printf '{"isPlaying":%s,"title":"%s","artist":"%s","album":"%s","player":"%s","playerList":%s,"albumArt":"%s"}\n' \
+                "$is_playing" "${title//\"/\\\"}" "${artist//\"/\\\"}" "${album//\"/\\\"}" "${player//\"/\\\"}" "$players_json" "${album_art//\"/\\\"}"
         fi
         ;;
     action)
