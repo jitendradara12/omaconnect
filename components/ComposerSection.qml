@@ -68,8 +68,10 @@ Column {
             Button {
                 id: sendPing
                 text: "Send"
+                selected: true
                 foreground: root.foreground
                 fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
                 onClicked: panel.submitPing()
             }
 
@@ -78,6 +80,7 @@ Column {
                 text: "Cancel"
                 foreground: root.foreground
                 fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
                 onClicked: panel.closeComposer()
             }
         }
@@ -138,8 +141,10 @@ Column {
             Button {
                 id: sendText
                 text: "Send"
+                selected: true
                 foreground: root.foreground
                 fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
                 onClicked: panel.submitText()
             }
 
@@ -148,6 +153,7 @@ Column {
                 text: "Cancel"
                 foreground: root.foreground
                 fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
                 onClicked: panel.closeComposer()
             }
         }

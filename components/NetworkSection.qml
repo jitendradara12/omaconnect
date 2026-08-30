@@ -22,7 +22,7 @@ Column {
     readonly property bool hasCommandsAbove: !!(panel && panel.device && panel.device.paired && panel.device.reachable && panel.device.capabilities && panel.device.capabilities.commands && (!panel.getSetting || panel.getSetting("showRemoteCommands", true)))
 
     PanelSeparator {
-        visible: !root.hasCommandsAbove
+        visible: !root.hasCommandsAbove || (panel && panel.commandsExpanded)
         foreground: root.foreground
     }
 
@@ -84,7 +84,7 @@ Column {
             }
         }
 
-        Button {
+        PanelActionButton {
             id: refreshNetBtn
             visible: panel.networkExpanded
             iconText: "󰑐"
@@ -162,6 +162,7 @@ Column {
                 tooltipText: "Save this address in KDE Connect and discover devices"
                 foreground: root.foreground
                 fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
                 enabled: !!root.service && root.service.customAddressesReady && !root.service.addressBusy && addressInput.text.trim() !== ""
                 onClicked: if (root.service && root.service.addCustomAddress(addressInput.text)) addressInput.text = ""
             }
@@ -182,7 +183,7 @@ Column {
                     Row {
                         id: peerRow
                         width: parent.width
-                        spacing: Style.space(6)
+                        spacing: Style.space(8)
 
                         Text {
                             text: "●"
@@ -192,7 +193,7 @@ Column {
                         }
 
                         Text {
-                            width: Math.max(1, parent.width - peerButton.implicitWidth - Style.space(20))
+                            width: Math.max(1, parent.width - peerButton.implicitWidth - Style.space(24))
                             text: modelData ? (modelData.name + "  " + modelData.address + (modelData.online ? "" : "  Offline")) : ""
                             color: (modelData && modelData.online) ? root.foreground : Qt.darker(root.foreground, 1.5)
                             font.family: root.fontFamily
@@ -206,6 +207,7 @@ Column {
                             text: (root.service && modelData && root.service.customAddresses.indexOf(modelData.address) !== -1) ? "Saved" : "Add"
                             foreground: root.foreground
                             fontFamily: root.fontFamily
+                            fontSize: Style.font.bodySmall
                             enabled: !!root.service && root.service.customAddressesReady && !root.service.addressBusy && text !== "Saved"
                             onClicked: if (root.service && modelData) root.service.addCustomAddress(modelData.address)
                         }
@@ -249,6 +251,7 @@ Column {
                         text: "Remove"
                         foreground: root.foreground
                         fontFamily: root.fontFamily
+                        fontSize: Style.font.bodySmall
                         enabled: !!root.service && root.service.customAddressesReady && !root.service.addressBusy
                         onClicked: if (root.service) root.service.removeCustomAddress(modelData)
                     }

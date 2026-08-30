@@ -61,7 +61,7 @@ Column {
                 }
             }
         }
-        Button {
+        PanelActionButton {
             id: refreshCmdBtn
             visible: panel.commandsExpanded
             iconText: "󰑐"
