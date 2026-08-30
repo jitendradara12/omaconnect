@@ -35,7 +35,7 @@ KeyboardPanel {
     property int selectedIndex: 0
     property int actionSelectedIndex: 0
     property bool cursorActive: false
-    property bool mediaExpanded: false
+    property bool mediaExpanded: true
     property int mediaControlIndex: 1
     property bool commandsExpanded: false
     property int commandSelectedIndex: 0
