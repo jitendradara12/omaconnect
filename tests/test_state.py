@@ -1823,6 +1823,10 @@ class StateTests(unittest.TestCase):
     self.assertIn("backdropArt", media_section)
     self.assertIn("localAlbumArtUrl", (ROOT / "scripts" / "media_control.sh").read_text())
     self.assertNotIn("Style.font.bodyLarge", media_section)
+    self.assertIn("anchors.left: parent.left", media_section)
+    self.assertNotIn("anchors.leftMargin: Style.space(6)", media_section)
+    self.assertIn("Math.max(1, parent.width - Style.space(32))", media_section)
+    self.assertIn("anchors.right: parent.right", media_section)
 
   def test_media_player_keyboard_navigation_in_panel(self):
     panel_source = (ROOT / "Panel.qml").read_text()

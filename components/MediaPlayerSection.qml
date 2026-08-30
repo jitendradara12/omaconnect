@@ -56,9 +56,6 @@ Column {
         Row {
             id: headerRow
             anchors.left: parent.left
-            anchors.leftMargin: Style.space(6)
-            anchors.right: parent.right
-            anchors.rightMargin: Style.space(6)
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(6)
 
@@ -71,7 +68,7 @@ Column {
             }
 
             Text {
-                width: Math.max(1, parent.width - Style.space(40))
+                width: Math.max(1, parent.width - Style.space(32))
                 text: root.trackTitle + (root.trackArtist ? "  •  " + root.trackArtist : "")
                 color: root.foreground
                 font.family: root.fontFamily
@@ -80,14 +77,15 @@ Column {
                 elide: Text.ElideRight
                 anchors.verticalCenter: parent.verticalCenter
             }
+        }
 
-            Text {
-                text: "󰅀"
-                color: Qt.darker(root.foreground, 1.4)
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                anchors.verticalCenter: parent.verticalCenter
-            }
+        Text {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: "󰅀"
+            color: Qt.darker(root.foreground, 1.4)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
         }
     }
 
