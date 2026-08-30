@@ -33,9 +33,8 @@ Column {
 
     CursorSurface {
         id: collapsedBar
-        visible: !panel.mediaExpanded
         width: parent.width
-        implicitHeight: collapsedRow.implicitHeight + Style.space(10)
+        implicitHeight: headerRow.implicitHeight + Style.space(6)
         hasCursor: panel.cursorActive && panel.focusSection === "media" && !panel.mediaExpanded
         radius: Style.cornerRadius
         foreground: root.foreground
@@ -54,46 +53,40 @@ Column {
         }
 
         Row {
-            id: collapsedRow
+            id: headerRow
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.leftMargin: Style.space(8)
-            anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(8)
+            spacing: Style.space(6)
 
             Text {
                 text: root.isPlaying ? "󰝚" : "󰎈"
                 color: root.isPlaying ? Color.accent : root.foreground
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: Style.font.caption
                 anchors.verticalCenter: parent.verticalCenter
             }
 
             Text {
-                width: Math.max(1, parent.width - Style.space(56))
+                width: Math.max(1, parent.width - Style.space(36))
                 text: {
-                    if (root.service && root.service.mediaLoading) return "Syncing…"
-                    if (root.trackTitle && root.trackArtist) return root.trackTitle + "  •  " + root.trackArtist
-                    return root.trackTitle
+                    if (root.service && root.service.mediaLoading) return "SYNCING…"
+                    if (root.trackTitle && root.trackArtist) return (root.trackTitle + "  •  " + root.trackArtist).toUpperCase()
+                    return root.trackTitle.toUpperCase()
                 }
-                color: root.isPlaying ? root.foreground : Qt.darker(root.foreground, 1.25)
+                color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
-                font.bold: root.isPlaying
+                font.bold: true
+                font.capitalization: Font.AllUppercase
                 elide: Text.ElideRight
                 anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Item {
-                width: 1
-                height: 1
             }
 
             Text {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: "󰅂"
+                text: panel.mediaExpanded ? "󰅃" : "󰅀"
                 color: Qt.darker(root.foreground, 1.4)
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -127,42 +120,6 @@ Column {
             anchors.fill: parent
             visible: backdropArt.visible
             color: Qt.rgba(0, 0, 0, 0.35)
-        }
-
-        CursorSurface {
-            id: minimizeBtn
-            anchors.top: parent.top
-            anchors.right: parent.right
-            anchors.margins: Style.space(8)
-            implicitWidth: Style.space(22)
-            implicitHeight: Style.space(22)
-            radius: Style.cornerRadius
-            foreground: root.foreground
-            fill: minMouseArea.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12) : "transparent"
-            currentFill: Style.selectedFillFor(root.foreground, Color.accent)
-            z: 2
-
-            PanelToolTip {
-                visible: minMouseArea.containsMouse
-                text: "Minimize media player"
-                fontFamily: root.fontFamily
-            }
-
-            MouseArea {
-                id: minMouseArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: panel.toggleMediaExpanded()
-            }
-
-            Text {
-                anchors.centerIn: parent
-                text: "󰅃"
-                color: minMouseArea.containsMouse ? Color.accent : Qt.darker(root.foreground, 1.3)
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-            }
         }
 
         Column {
@@ -208,7 +165,7 @@ Column {
                 }
 
                 Column {
-                    width: Math.max(1, parent.width - coverFrame.width - Style.space(38))
+                    width: Math.max(1, parent.width - coverFrame.width - Style.space(10))
                     spacing: Style.space(4)
                     anchors.verticalCenter: parent.verticalCenter
 

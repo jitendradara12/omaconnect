@@ -1807,7 +1807,6 @@ class StateTests(unittest.TestCase):
 
     media_section = (ROOT / "components" / "MediaPlayerSection.qml").read_text()
     self.assertIn("collapsedBar", media_section)
-    self.assertIn("minimizeBtn", media_section)
     self.assertIn("panel.mediaExpanded", media_section)
     self.assertIn("toggleMediaExpanded", media_section)
     self.assertIn("PanelToolTip", media_section)
