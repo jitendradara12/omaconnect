@@ -10,7 +10,7 @@ Column {
     required property var panel
 
     width: parent ? parent.width : 0
-    spacing: Style.space(6)
+    spacing: Style.space(8)
     visible: !!(panel && panel.device && panel.device.paired && panel.device.reachable)
 
     readonly property var bar: panel ? panel.bar : null
@@ -18,6 +18,8 @@ Column {
     readonly property var device: panel ? panel.device : null
     readonly property color foreground: bar ? bar.foreground : "#ffffff"
     readonly property string fontFamily: bar ? bar.fontFamily : "sans-serif"
+
+    PanelSeparator { foreground: root.foreground }
 
     PanelSectionHeader {
         text: (root.device && root.device.type && root.device.type !== "unknown") ? (root.device.type.toUpperCase() + " ACTIONS") : "ACTIONS"
@@ -68,8 +70,9 @@ Column {
                     fontFamily: root.fontFamily
                 }
 
-                implicitWidth: (actionIcon !== "" ? Style.space(16) : 0) + actionBtnText.implicitWidth + Style.space(16)
-                implicitHeight: Math.max(actionBtnText.implicitHeight, Style.space(16)) + Style.space(8)
+                implicitWidth: actionRowContent.implicitWidth + Style.space(16)
+                implicitHeight: actionRowContent.implicitHeight + Style.space(8)
+                radius: Style.cornerRadius
                 hasCursor: panel.cursorActive && panel.focusSection === "actions" && panel.actionSelectedIndex === index
                 current: (modelData === "ping" && panel.activeComposer === "ping") || (modelData === "text" && panel.activeComposer === "text")
                 foreground: root.foreground
@@ -81,6 +84,7 @@ Column {
                     id: actionMouseArea
                     anchors.fill: parent
                     hoverEnabled: true
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                     onEntered: {
                         panel.cursorActive = true
                         panel.focusSection = "actions"
@@ -90,13 +94,14 @@ Column {
                 }
 
                 Row {
+                    id: actionRowContent
                     anchors.centerIn: parent
-                    spacing: Style.space(4)
+                    spacing: Style.space(6)
 
                     Text {
                         visible: actionSurface.actionIcon !== ""
                         text: actionSurface.actionIcon
-                        color: root.foreground
+                        color: actionSurface.current ? Color.accent : root.foreground
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption
                         anchors.verticalCenter: parent.verticalCenter
@@ -108,6 +113,7 @@ Column {
                         color: root.foreground
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.bodySmall
+                        font.bold: actionSurface.current
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }

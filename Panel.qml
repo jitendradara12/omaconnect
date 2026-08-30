@@ -23,6 +23,8 @@ KeyboardPanel {
     readonly property var service: hostWidget && hostWidget.service ? hostWidget.service : (bar && bar.shell && typeof bar.shell.serviceFor === "function" ? bar.shell.serviceFor("omaconnect") : null)
     readonly property var device: service ? service.selectedDevice : null
     readonly property string deviceName: device && typeof device.name === "string" ? device.name : "KDE Connect"
+    readonly property var incomingRequest: service ? service.incomingPairRequest : null
+    readonly property bool remoteCommandsVisible: !!(device && device.paired && device.reachable && device.capabilities && device.capabilities.commands && (!getSetting || getSetting("showRemoteCommands", true)))
 
     property string activeComposer: "none"
     property string draftPing: ""
@@ -34,6 +36,7 @@ KeyboardPanel {
     property bool cursorActive: false
     property bool commandsExpanded: false
     property int commandSelectedIndex: 0
+    property bool networkExpanded: false
     property string unpairConfirmingId: ""
 
     function open() {
@@ -228,6 +231,13 @@ KeyboardPanel {
         }
     }
 
+    function toggleNetworkExpanded() {
+        networkExpanded = !networkExpanded
+        if (networkExpanded && service) {
+            service.refreshTailscale()
+        }
+    }
+
     function selectCommand(delta) {
         var list = (service && service.remoteCommands) ? service.remoteCommands : []
         if (!list.length) return
@@ -280,6 +290,8 @@ KeyboardPanel {
             } else {
                 service.fetchRemoteCommands(device.id)
             }
+        } else if (focusSection === "network" && service) {
+            toggleNetworkExpanded()
         }
     }
 
@@ -436,6 +448,7 @@ KeyboardPanel {
                 id: contentColumn
                 width: scrollView.width
                 spacing: Style.space(12)
+                bottomPadding: Style.space(8)
 
                 DeviceSection {
                     id: deviceSection
@@ -454,6 +467,11 @@ KeyboardPanel {
 
                 RemoteCommandsSection {
                     id: remoteCommandsSection
+                    panel: root
+                }
+
+                NetworkSection {
+                    id: networkSection
                     panel: root
                 }
             }

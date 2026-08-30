@@ -47,9 +47,24 @@ Item {
     property bool fileBusy: false
     property var capabilities: ({})
     property int monitorRestartCount: 0
+    property bool tailscaleInstalled: false
+    property bool tailscaleRunning: false
+    property bool tailscaleLoading: false
+    property string tailscaleStatus: "Checking Tailscale"
+    property string localTailscaleAddress: ""
+    property var tailscalePeers: []
+    property var customAddresses: []
+    property bool customAddressesReady: false
+    property bool addressBusy: false
 
     readonly property var reachableDevices: devices.filter(function(device) { return device.reachable })
     readonly property var selectedDevice: deviceById(selectedDeviceId)
+    readonly property var incomingPairRequest: {
+        for (var i = 0; i < devices.length; i++) {
+            if (devices[i].pairRequestedByPeer) return devices[i]
+        }
+        return null
+    }
     readonly property bool connected: reachableDevices.length > 0
 
     function deviceById(id) {
@@ -116,12 +131,163 @@ Item {
         return scriptPath("scripts/discover_devices.sh")
     }
 
+    function formatVerificationKey(key) {
+        var value = String(key || "").trim()
+        return value.length === 8 ? value.slice(0, 4) + " " + value.slice(4) : value
+    }
+
+    function addressError(address) {
+        var value = String(address || "").trim()
+        if (!value) return "Enter an IP address"
+        if (/\s|\/|\[|\]|%/.test(value)) return "Enter a literal IPv4 or IPv6 address"
+        var ipv4 = value.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+        if (ipv4) {
+            for (var i = 1; i <= 4; i++) if (Number(ipv4[i]) > 255) return "Invalid IPv4 address"
+            return ""
+        }
+        if (/^[0-9a-fA-F:]+$/.test(value) && value.indexOf(":::") === -1) {
+            var halves = value.split("::")
+            if (halves.length === 1) {
+                var fullGroups = value.split(":")
+                if (fullGroups.length === 8 && fullGroups.every(function(group) { return /^[0-9a-fA-F]{1,4}$/.test(group) })) return ""
+            } else if (halves.length === 2) {
+                var leftGroups = halves[0] ? halves[0].split(":") : []
+                var rightGroups = halves[1] ? halves[1].split(":") : []
+                var compressedGroups = leftGroups.concat(rightGroups)
+                if (compressedGroups.length < 8 && compressedGroups.every(function(group) { return /^[0-9a-fA-F]{1,4}$/.test(group) })) return ""
+            }
+        }
+        return "Enter a literal IPv4 or IPv6 address"
+    }
+
+    function isAddressSaved(address) {
+        return customAddresses.indexOf(String(address || "").trim()) !== -1
+    }
+
+    function filteredTailscalePeers(query) {
+        var needle = String(query || "").trim().toLowerCase()
+        if (!needle) return tailscalePeers
+        return tailscalePeers.filter(function(peer) {
+            return [peer.name, peer.hostName, peer.dnsName, peer.address, peer.os].some(function(field) {
+                return String(field || "").toLowerCase().indexOf(needle) !== -1
+            })
+        })
+    }
+
+    function extractIPv4(addresses) {
+        var list = addresses || []
+        for (var i = 0; i < list.length; i++) {
+            if (/^\d+\.\d+\.\d+\.\d+$/.test(String(list[i]))) return String(list[i])
+        }
+        return ""
+    }
+
+    function parseTailscaleStatus(output) {
+        var data = JSON.parse(String(output || "{}"))
+        var backend = String(data.BackendState || "")
+        var running = backend === "Running"
+        var localAddresses = (data.Self && data.Self.TailscaleIPs) || data.TailscaleIPs || []
+        var local = extractIPv4(localAddresses)
+        var peers = []
+        var rawPeers = data.Peer || {}
+        Object.keys(rawPeers).forEach(function(key) {
+            var raw = rawPeers[key] || {}
+            var address = extractIPv4(raw.TailscaleIPs || [])
+            if (!address) return
+            var dns = String(raw.DNSName || "").replace(/\.$/, "")
+            var host = String(raw.HostName || "")
+            peers.push({
+                id: String(raw.ID || key),
+                name: host || (dns ? dns.split(".")[0] : address),
+                hostName: host,
+                dnsName: dns,
+                os: String(raw.OS || ""),
+                address: address,
+                online: raw.Online === true
+            })
+        })
+        peers.sort(function(a, b) {
+            if (a.online !== b.online) return a.online ? -1 : 1
+            return a.name.localeCompare(b.name)
+        })
+        return { running: running, backend: backend, localAddress: local, peers: peers }
+    }
+
+    function refreshTailscale() {
+        if (tailscaleProcess.running) return
+        tailscaleLoading = true
+        tailscaleProcess.command = ["sh", "-c", "command -v tailscale >/dev/null 2>&1 || exit 127; exec tailscale status --json"]
+        tailscaleProcess.running = true
+    }
+
+    function addCustomAddress(address) {
+        var value = String(address || "").trim()
+        if (!customAddressesReady) {
+            actionState = "blocked"
+            actionMessage = ""
+            actionError = "KDE Connect address list is not ready"
+            return false
+        }
+        var error = addressError(value)
+        if (error) {
+            actionState = "blocked"
+            actionMessage = ""
+            actionError = error
+            return false
+        }
+        if (isAddressSaved(value)) {
+            actionState = "accepted"
+            actionMessage = "Address already saved; discovering devices"
+            actionError = ""
+            refresh(true)
+            return true
+        }
+        return writeCustomAddress(value, false)
+    }
+
+    function removeCustomAddress(address) {
+        var value = String(address || "").trim()
+        if (!customAddressesReady || !isAddressSaved(value)) return false
+        return writeCustomAddress(value, true)
+    }
+
+    function getAddressScriptPath() {
+        return scriptPath("scripts/update_custom_address.sh")
+    }
+
+    function writeCustomAddress(address, removal) {
+        if (!customAddressesReady || addressProcess.running) return false
+        addressBusy = true
+        addressProcess.targetAddress = address
+        addressProcess.removal = removal
+        addressProcess.command = ["bash", getAddressScriptPath(), removal ? "remove" : "add", address]
+        actionState = "running"
+        actionMessage = removal ? "Removing saved address" : "Saving address"
+        actionError = ""
+        addressProcess.running = true
+        return true
+    }
+
     function getPickerScriptPath() {
         return scriptPath("scripts/pick_file.sh")
     }
 
     function getSmsScriptPath() {
         return scriptPath("scripts/open_sms.sh")
+    }
+
+    function getAppScriptPath() {
+        return scriptPath("scripts/open_app.sh")
+    }
+
+    function openKdeConnectApp() {
+        if (appProcess.running) return false
+        actionState = "running"
+        actionMessage = "Opening KDE Connect"
+        actionError = ""
+        appProcess.command = ["bash", getAppScriptPath()]
+        appProcess.running = true
+        return true
     }
 
     function getFirewallScriptPath() {
@@ -147,6 +313,7 @@ Item {
     }
 
     function refresh(forceNetwork) {
+        if (forceNetwork) refreshTailscale()
         if (scanProcess.running) {
             if (!forceNetwork) return
             scanProcess.running = false
@@ -202,15 +369,11 @@ Item {
         var batteryAllowed = showBattery !== false
         var networkAllowed = showNetwork !== false
         var batteryText = ""
-        if (batteryAllowed && device.capabilities && device.capabilities.battery) {
-            if (device.battery < 0) {
-                batteryText = "Battery unavailable"
-            } else {
-                var charging = !!(device.isCharging || device.charging)
-                if (charging) batteryText = device.battery + "% • Charging"
-                else if (device.battery <= 20) batteryText = device.battery + "% • Low battery"
-                else batteryText = device.battery + "% • Discharging"
-            }
+        if (batteryAllowed && device.capabilities && device.capabilities.battery && device.battery >= 0) {
+            var charging = !!(device.isCharging || device.charging)
+            if (charging) batteryText = device.battery + "% • Charging"
+            else if (device.battery <= 20) batteryText = device.battery + "% • Low battery"
+            else batteryText = device.battery + "% • Discharging"
         }
         var netText = ""
         if (networkAllowed && device.networkType) {
@@ -276,6 +439,9 @@ Item {
             charging: parts[7] === "true",
             networkType: netType,
             networkStrength: netStrength,
+            pairRequested: parts.length > 11 && parts[11] === "true",
+            pairRequestedByPeer: parts.length > 12 && parts[12] === "true",
+            verificationKey: parts.length > 13 ? String(parts[13] || "").trim() : "",
             capabilities: {
                 battery: hasPlugin("kdeconnect_battery"),
                 ping: hasPlugin("kdeconnect_ping"),
@@ -301,11 +467,25 @@ Item {
         scanning = false
         if (targetGeneration !== generation) return
         var next = []
+        var nextAddresses = []
+        var addressesReady = false
         String(output || "").split("\n").forEach(function(line) {
+            var clean = String(line || "").trim()
+            if (clean === "CUSTOM_ADDRESSES_READY") {
+                addressesReady = true
+                return
+            }
+            if (clean.indexOf("CUSTOM_ADDRESS\t") === 0) {
+                var address = clean.slice(15).trim()
+                if (address && nextAddresses.indexOf(address) === -1) nextAddresses.push(address)
+                return
+            }
             var device = root.parseScanLine(line)
             if (device) next.push(device)
         })
         devices = next
+        customAddressesReady = addressesReady
+        if (addressesReady) customAddresses = nextAddresses
         next.forEach(function(dev) {
             if (dev.paired) {
                 if (root.pendingPairing[dev.id] === "requesting") {
@@ -520,6 +700,29 @@ Item {
         return true
     }
 
+    function respondToPairingRequest(id, accept) {
+        var device = deviceById(id)
+        if (!device || !device.pairRequestedByPeer || pairResponseProcess.running || pairProcess.running) return false
+        selectDevice(id)
+        setPendingPairing(id, accept ? "accepting" : "rejecting")
+        pairResponseProcess.targetDeviceId = String(id)
+        pairResponseProcess.accepting = accept
+        pairResponseProcess.command = ["gdbus", "call", "--session", "--dest", "org.kde.kdeconnect", "--object-path", "/modules/kdeconnect/devices/" + String(id), "--method", accept ? "org.kde.kdeconnect.device.acceptPairing" : "org.kde.kdeconnect.device.cancelPairing"]
+        actionState = "running"
+        actionMessage = accept ? "Accepting pairing request" : "Rejecting pairing request"
+        actionError = ""
+        pairResponseProcess.running = true
+        return true
+    }
+
+    function acceptPairing(id) {
+        return respondToPairingRequest(id, true)
+    }
+
+    function rejectPairing(id) {
+        return respondToPairingRequest(id, false)
+    }
+
     function unpairDevice(id) {
         var device = deviceById(id)
         if (!device || pairProcess.running || actionProcess.running || !device.capabilities.pair) return false
@@ -607,6 +810,20 @@ Item {
         }
     }
 
+    Process {
+        id: pairResponseProcess
+        property string targetDeviceId: ""
+        property bool accepting: false
+        stderr: StdioCollector { waitForEnd: true }
+        onExited: function(code) {
+            root.setPendingPairing(targetDeviceId, "")
+            root.actionState = code === 0 ? "accepted" : "failed"
+            root.actionMessage = code === 0 ? (accepting ? "Pairing response sent" : "Pairing request rejected") : ""
+            root.actionError = code === 0 ? "" : root.safeError(code, accepting ? "pairing" : "pairing rejection")
+            root.refresh()
+        }
+    }
+
     Timer { id: dbusDebounceTimer; interval: 300; repeat: false; onTriggered: root.refresh() }
 
     Timer {
@@ -660,6 +877,63 @@ Item {
     }
 
     Process {
+        id: tailscaleProcess
+        stdout: StdioCollector { waitForEnd: true }
+        stderr: StdioCollector { waitForEnd: true }
+        onExited: function(code) {
+            root.tailscaleLoading = false
+            if (code === 127) {
+                root.tailscaleInstalled = false
+                root.tailscaleRunning = false
+                root.tailscaleStatus = "Not installed (optional)"
+                root.localTailscaleAddress = ""
+                root.tailscalePeers = []
+                return
+            }
+            root.tailscaleInstalled = true
+            if (code !== 0) {
+                root.tailscaleRunning = false
+                root.tailscaleStatus = "Not connected"
+                root.localTailscaleAddress = ""
+                root.tailscalePeers = []
+                return
+            }
+            try {
+                var status = root.parseTailscaleStatus(stdout.text)
+                root.tailscaleRunning = status.running
+                root.tailscaleStatus = status.running ? "Connected" : (status.backend || "Not connected")
+                root.localTailscaleAddress = status.localAddress
+                root.tailscalePeers = status.peers
+            } catch (error) {
+                root.tailscaleRunning = false
+                root.tailscaleStatus = "Invalid status response"
+                root.localTailscaleAddress = ""
+                root.tailscalePeers = []
+            }
+        }
+    }
+
+    Process {
+        id: addressProcess
+        property string targetAddress: ""
+        property bool removal: false
+        stderr: StdioCollector { waitForEnd: true }
+        onExited: function(code) {
+            root.addressBusy = false
+            if (code === 0) {
+                root.actionState = "accepted"
+                root.actionMessage = removal ? "Saved address removed" : "Address saved; discovering devices"
+                root.actionError = ""
+                root.refresh(true)
+            } else {
+                root.actionState = "failed"
+                root.actionMessage = ""
+                root.actionError = root.safeError(code, removal ? "address removal" : "address save")
+            }
+        }
+    }
+
+    Process {
         id: firewallProcess
         onExited: function(code) {
             root.refresh(true)
@@ -673,8 +947,23 @@ Item {
         }
     }
 
+    Process {
+        id: appProcess
+        onExited: function(code) {
+            if (code === 0) {
+                root.actionState = "accepted"
+                root.actionMessage = "KDE Connect opened"
+                root.actionError = ""
+            } else {
+                root.actionState = "failed"
+                root.actionMessage = ""
+                root.actionError = root.safeError(code, "KDE Connect app")
+            }
+        }
+    }
+
     Timer { id: signalRestart; repeat: false; onTriggered: if (!signalProcess.running) signalProcess.running = true }
     Timer { interval: 15000; running: !signalProcess.running; repeat: true; onTriggered: root.refresh() }
-    Component.onCompleted: { root.refresh(); signalProcess.running = true }
-    Component.onDestruction: { actionDismissTimer.stop(); dbusDebounceTimer.stop(); pairingWatchdogTimer.stop(); signalRestart.stop(); signalProcess.running = false; scanProcess.running = false; commandsProcess.running = false; actionProcess.running = false; pairProcess.running = false; filePickerProcess.running = false; firewallProcess.running = false; installProcess.running = false }
+    Component.onCompleted: { root.refresh(); root.refreshTailscale(); signalProcess.running = true }
+    Component.onDestruction: { actionDismissTimer.stop(); dbusDebounceTimer.stop(); pairingWatchdogTimer.stop(); signalRestart.stop(); signalProcess.running = false; scanProcess.running = false; commandsProcess.running = false; actionProcess.running = false; pairProcess.running = false; pairResponseProcess.running = false; filePickerProcess.running = false; tailscaleProcess.running = false; addressProcess.running = false; firewallProcess.running = false; installProcess.running = false; appProcess.running = false }
 }

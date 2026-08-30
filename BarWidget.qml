@@ -58,7 +58,8 @@ BarWidget {
         id: buttonItem
         anchors.fill: parent
         bar: root.bar
-        text: "󰄜"
+        text: root.device && root.service && root.settings && root.settings.showDeviceTypeIcons !== false
+            ? root.service.deviceTypeIcon(root.device.type) : "󰄜"
         tooltipText: {
             if (!root.device || !root.device.reachable) return root.deviceName
             var showBat = !root.settings || root.settings.showBatteryStats !== false

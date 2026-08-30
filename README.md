@@ -19,7 +19,10 @@ omarchy plugin add https://github.com/jitendradara12/omaconnect.git --enable --y
 - **SMS launcher**: Open `kdeconnect-sms` for a paired device.
 - **File picker**: Select recent files from user directories with Omarchy's menu picker.
 - **Remote commands**: View and trigger commands defined on paired devices.
-- **Pairing controls**: Pair and unpair devices with inline confirmation safeguards.
+- **Pairing controls**: Start pairing, verify and accept/reject incoming requests, and unpair with inline confirmation safeguards.
+- **Tailscale discovery**: Find tailnet peers without an API token and add their stable IP to KDE Connect with one click.
+- **VPN and manual addresses**: Save or remove literal LAN/VPN addresses using KDE Connect's own persisted address list.
+- **At-a-glance bar status**: Show the selected device status icon directly in the bar.
 - **Modular preferences**: Toggle specific actions, telemetry fields, or panel sections to match your workflow.
 
 ## Preferences and configuration
@@ -30,6 +33,7 @@ You can customize OmaConnect via your Omarchy bar widget settings. All options d
 |---|---|---|---|
 | `showBatteryStats` | boolean | `true` | Display battery percentage and charging indicator |
 | `showNetworkStats` | boolean | `true` | Display cellular network type and signal strength |
+| `showTailscale` | boolean | `true` | Display optional Tailscale and custom-address discovery |
 | `showDeviceTypeIcons` | boolean | `true` | Display device type icons (phone, tablet, laptop, desktop) |
 | `showRemoteCommands` | boolean | `true` | Display remote commands section |
 | `showTroubleshooting` | boolean | `true` | Display setup and firewall helpers when devices are offline |
@@ -47,6 +51,8 @@ OmaConnect does not run arbitrary commands or download unverified scripts.
 
 - **Dependency installation**: The installer helper uses your system's package manager (`pacman`). It displays the exact command (`sudo pacman -S --needed kdeconnect glib2 dbus`) and asks for confirmation before requesting root privileges.
 - **Firewall setup**: The firewall helper detects UFW or firewalld, displays the exact rules before applying them, and prompts for confirmation before running `sudo`.
+- **Tailscale privacy**: Peer information is read locally from `tailscale status --json`; OmaConnect uses no Tailscale API token or remote service.
+- **Address ownership**: Added addresses are written to KDE Connect's own `customDevices` D-Bus property. OmaConnect does not maintain a second trust or connection database.
 - **UI tooltips**: Hovering over troubleshooting buttons displays the exact command that will execute.
 
 ## Shortcuts
@@ -59,7 +65,7 @@ o.bind("SUPER + SHIFT + C", "Toggle OmaConnect", "omarchy-shell shell toggle oma
 
 ## Dependencies
 
-Requires `kdeconnect`, `glib2`, `dbus`, and Omarchy's `omarchy-menu-select` command for file sharing.
+Requires `kdeconnect`, `glib2`, `dbus`, and Omarchy's `omarchy-menu-select` command for file sharing. Tailscale is optional and only needed for cross-network peer discovery.
 
 To install dependencies manually:
 
@@ -67,9 +73,18 @@ To install dependencies manually:
 sudo pacman -S --needed kdeconnect glib2 dbus
 ```
 
+### Connect across networks with Tailscale
+
+1. Install Tailscale on both devices and join them to the same tailnet.
+2. Open OmaConnect and find **Network Discovery**.
+3. Select **Add** beside the other device. OmaConnect saves its stable Tailscale IPv4 address in KDE Connect and starts discovery.
+4. Keep KDE Connect open on the other device, then compare the verification key and accept pairing on both devices.
+
+You can also type any literal LAN or VPN IPv4/IPv6 address. Tailscale is optional; normal KDE Connect LAN discovery continues to work without it.
+
 ### Firewall configuration
 
-Omarchy blocks incoming ports by default. Allow KDE Connect discovery and transfer ports:
+Omarchy blocks incoming ports by default. Allow KDE Connect discovery and transfer ports on the network interface you use, including the Tailscale interface for cross-network connections:
 
 ![OmaConnect screenshot of allow in firewall](preview1.png)
 
