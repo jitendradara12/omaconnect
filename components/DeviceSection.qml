@@ -516,5 +516,30 @@ Column {
                 onClicked: if (root.service) root.service.configureFirewall()
             }
         }
+
+        // KDE Connect's own windows are Kirigami apps and take their colours
+        // from ~/.config/kdeglobals, not from the Omarchy theme, so they open
+        // in Breeze light until that file exists.
+        Row {
+            visible: root.showTroubleshooting
+            spacing: Style.space(6)
+
+            Text {
+                text: "KDE windows unthemed?"
+                color: Qt.darker(root.foreground, 1.4)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Button {
+                text: "Match Omarchy Theme"
+                tooltipText: "Generates ~/.config/kdeglobals from the active theme, and keeps it in sync on theme change. No root needed."
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
+                onClicked: if (root.service) root.service.setupKdeTheme()
+            }
+        }
     }
 }

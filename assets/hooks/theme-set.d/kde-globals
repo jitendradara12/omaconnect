@@ -1,0 +1,26 @@
+#!/bin/bash
+# Install the theme-rendered KDE color scheme so KDE Frameworks apps
+# (kdeconnect-sms, kdeconnect-app, dolphin, gwenview, okular, ark, ...)
+# follow the active Omarchy theme.
+#
+# Kirigami and KColorScheme read ~/.config/kdeglobals directly and ignore
+# QT_QPA_PLATFORMTHEME. Without this file they render with Breeze *light*
+# defaults regardless of the desktop theme.
+#
+# The file itself is produced by ~/.config/omarchy/themed/kdeglobals.tpl,
+# which omarchy-theme-set-templates renders before this hook runs.
+
+set -euo pipefail
+
+rendered="$HOME/.local/state/omarchy/current/theme/kdeglobals"
+target="$HOME/.config/kdeglobals"
+
+# Themes without a colors.toml render no templates; leave any existing file be.
+[[ -f $rendered ]] || exit 0
+
+mkdir -p "$(dirname "$target")"
+install -m 0644 "$rendered" "$target"
+
+# Already-running KDE apps cache the palette at startup and must be
+# relaunched to pick up a new scheme; nothing to signal here.
+exit 0
