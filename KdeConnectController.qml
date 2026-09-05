@@ -336,6 +336,22 @@ Item {
         installProcess.running = true
     }
 
+    function getKdeThemeScriptPath() {
+        return scriptPath("scripts/setup_kde_theme.sh")
+    }
+
+    // kdeconnect-sms and kdeconnect-app are Kirigami apps: they colour
+    // themselves from KColorScheme (~/.config/kdeglobals), which the Omarchy
+    // theme never writes, so they open in Breeze light on a dark desktop. The
+    // helper installs a theme template plus a theme-set hook that keep that
+    // file in step with whatever theme is active.
+    function setupKdeTheme() {
+        if (kdeThemeProcess.running) return
+        var script = getKdeThemeScriptPath()
+        kdeThemeProcess.command = ["bash", "-c", "if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then omarchy-launch-floating-terminal-with-presentation \"bash '" + script + "'\"; else xdg-terminal-exec bash '" + script + "'; fi"]
+        kdeThemeProcess.running = true
+    }
+
     function refresh(forceNetwork) {
         if (forceNetwork) refreshTailscale()
         if (scanProcess.running) {
@@ -1033,6 +1049,10 @@ Item {
         onExited: function(code) {
             root.refresh(true)
         }
+    }
+
+    Process {
+        id: kdeThemeProcess
     }
 
     Process {
