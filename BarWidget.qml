@@ -14,6 +14,7 @@ BarWidget {
     readonly property var device: service ? service.selectedDevice : null
     readonly property string deviceName: device && typeof device.name === "string" ? device.name : "KDE Connect"
     readonly property bool hasBattery: !!(device && device.reachable && device.battery >= 0)
+    readonly property bool showBarBattery: !!(root.settings && root.settings.showBarBattery && root.hasBattery)
     readonly property Item button: buttonItem
 
     function injectPanel() {
@@ -59,11 +60,11 @@ BarWidget {
         id: buttonItem
         anchors.fill: parent
         bar: root.bar
+        slotSize: Style.bar.iconSlot * (root.showBarBattery && (!root.bar || !root.bar.vertical) ? 2 : 1)
         text: {
             var icon = root.device && root.service && root.settings && root.settings.showDeviceTypeIcons !== false
                 ? root.service.deviceTypeIcon(root.device.type) : "󰄜"
-            var showBarBattery = !!(root.settings && root.settings.showBarBattery && root.hasBattery)
-            return showBarBattery ? (icon + " " + root.device.battery + "%") : icon
+            return root.showBarBattery ? (icon + " " + root.device.battery + "%") : icon
         }
         tooltipText: {
             var showBat = !root.settings || root.settings.showBatteryStats !== false

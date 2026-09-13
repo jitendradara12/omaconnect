@@ -1859,6 +1859,8 @@ class StateTests(unittest.TestCase):
     self.assertIn("showBarBattery", bar_widget)
     self.assertIn("root.settings.showBarBattery", bar_widget)
     self.assertIn("hasBattery", bar_widget)
+    self.assertIn("slotSize", bar_widget)
+    self.assertIn("Style.bar.iconSlot", bar_widget)
 
     def evaluate_bar_text(device, settings, icon="📱"):
         dev_icon = icon if (device and (not settings or settings.get("showDeviceTypeIcons", True))) else "󰄜"
