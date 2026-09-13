@@ -951,7 +951,7 @@ class StateTests(unittest.TestCase):
     self.assertIn('panel.networkExpanded', network_ui)
     self.assertIn('property bool networkExpanded', panel)
     self.assertIn('function toggleNetworkExpanded', panel)
-    self.assertNotIn('root.device.battery + "%"', bar_widget)
+    self.assertIn('showBarBattery', bar_widget)
 
   def test_custom_address_update_merges_with_authoritative_dbus_state(self):
     with tempfile.TemporaryDirectory() as tmp:
@@ -1615,6 +1615,8 @@ class StateTests(unittest.TestCase):
     self.assertIn("settings", manifest)
     settings = manifest["settings"]
     self.assertIn("showBatteryStats", settings)
+    self.assertIn("showBarBattery", settings)
+    self.assertFalse(settings["showBarBattery"]["default"])
     self.assertIn("showNetworkStats", settings)
     self.assertIn("showDeviceTypeIcons", settings)
     self.assertIn("showMediaPlayer", settings)
@@ -1848,6 +1850,32 @@ class StateTests(unittest.TestCase):
 
     manifest_source = (ROOT / "manifest.json").read_text()
     self.assertIn("showMediaPlayer", manifest_source)
+
+  def test_bar_widget_battery_feature_flag(self):
+    bar_widget = (ROOT / "BarWidget.qml").read_text()
+    manifest = json.loads((ROOT / "manifest.json").read_text())
+    self.assertIn("showBarBattery", manifest["settings"])
+    self.assertFalse(manifest["settings"]["showBarBattery"]["default"])
+    self.assertIn("showBarBattery", bar_widget)
+    self.assertIn("root.settings.showBarBattery", bar_widget)
+    self.assertIn("hasBattery", bar_widget)
+
+    def evaluate_bar_text(device, settings, icon="📱"):
+        dev_icon = icon if (device and (not settings or settings.get("showDeviceTypeIcons", True))) else "󰄜"
+        has_battery = bool(device and device.get("reachable") and device.get("battery", -1) >= 0)
+        show_bar_battery = bool(settings and settings.get("showBarBattery") is True and has_battery)
+        return f"{dev_icon} {device['battery']}%" if show_bar_battery else dev_icon
+
+    self.assertEqual(evaluate_bar_text({"reachable": True, "battery": 85}, {}), "📱")
+    self.assertEqual(evaluate_bar_text({"reachable": True, "battery": 85}, {"showBarBattery": False}), "📱")
+    self.assertEqual(evaluate_bar_text({"reachable": True, "battery": 85}, {"showBarBattery": True}), "📱 85%")
+    self.assertEqual(evaluate_bar_text({"reachable": False, "battery": 85}, {"showBarBattery": True}), "📱")
+    self.assertEqual(evaluate_bar_text({"reachable": True, "battery": -1}, {"showBarBattery": True}), "📱")
+    self.assertEqual(evaluate_bar_text(None, {"showBarBattery": True}), "󰄜")
+    self.assertEqual(
+        evaluate_bar_text({"reachable": True, "battery": 85}, {"showBarBattery": True, "showBatteryStats": False}),
+        "📱 85%",
+    )
 
 
 if __name__ == "__main__":
