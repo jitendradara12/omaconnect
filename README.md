@@ -29,6 +29,7 @@ Configure OmaConnect in Omarchy bar widget settings.
 | Setting | Default | Description |
 |---|---|---|
 | `showBatteryStats` | `true` | Battery percentage and charging state |
+| `showBarBattery` | `false` | Battery percentage next to the icon in the bar |
 | `showNetworkStats` | `true` | Cellular network type and signal strength |
 | `showTailscale` | `true` | Tailscale and custom IP discovery |
 | `showDeviceTypeIcons` | `true` | Device type icons in bar and panel |

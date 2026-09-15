@@ -25,6 +25,7 @@
   },
   "settings": {
     "showBatteryStats": { "type": "boolean", "default": true, "description": "Display battery percentage and charging state" },
+    "showBarBattery": { "type": "boolean", "default": false, "description": "Display battery percentage next to the icon in the bar" },
     "showNetworkStats": { "type": "boolean", "default": true, "description": "Display cellular network type and signal strength" },
     "showTailscale": { "type": "boolean", "default": true, "description": "Display optional Tailscale and custom address discovery" },
     "showDeviceTypeIcons": { "type": "boolean", "default": true, "description": "Show device type icons" },

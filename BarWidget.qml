@@ -13,6 +13,8 @@ BarWidget {
         ? bar.shell.serviceFor("omaconnect") : null
     readonly property var device: service ? service.selectedDevice : null
     readonly property string deviceName: device && typeof device.name === "string" ? device.name : "KDE Connect"
+    readonly property bool hasBattery: !!(device && device.reachable && device.battery >= 0)
+    readonly property bool showBarBattery: !!(root.settings && root.settings.showBarBattery && root.hasBattery)
     readonly property Item button: buttonItem
 
     function injectPanel() {
@@ -58,12 +60,15 @@ BarWidget {
         id: buttonItem
         anchors.fill: parent
         bar: root.bar
-        text: root.device && root.service && root.settings && root.settings.showDeviceTypeIcons !== false
-            ? root.service.deviceTypeIcon(root.device.type) : "󰄜"
+        slotSize: Style.bar.iconSlot * (root.showBarBattery && (!root.bar || !root.bar.vertical) ? 2 : 1)
+        text: {
+            var icon = root.device && root.service && root.settings && root.settings.showDeviceTypeIcons !== false
+                ? root.service.deviceTypeIcon(root.device.type) : "󰄜"
+            return root.showBarBattery ? (icon + " " + root.device.battery + "%") : icon
+        }
         tooltipText: {
-            if (!root.device || !root.device.reachable) return root.deviceName
             var showBat = !root.settings || root.settings.showBatteryStats !== false
-            if (showBat && root.device.battery >= 0) {
+            if (showBat && root.hasBattery) {
                 return root.deviceName + " (" + root.device.battery + "%)"
             }
             return root.deviceName
