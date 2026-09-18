@@ -22,7 +22,7 @@ Column {
     property alias textInput: textInput
 
     Column {
-        visible: panel.activeComposer === "ping" && !!root.device && root.device.paired && root.device.reachable && root.device.capabilities.ping
+        visible: panel.activeComposer === "ping" && !!root.device && root.device.paired && root.device.reachable && root.device.capabilities && root.device.capabilities.ping
         width: parent.width
         spacing: Style.space(6)
 
@@ -95,7 +95,7 @@ Column {
     }
 
     Column {
-        visible: panel.activeComposer === "text" && !!root.device && root.device.paired && root.device.reachable && root.device.capabilities.text
+        visible: panel.activeComposer === "text" && !!root.device && root.device.paired && root.device.reachable && root.device.capabilities && root.device.capabilities.text
         width: parent.width
         spacing: Style.space(6)
 

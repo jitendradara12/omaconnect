@@ -5,9 +5,11 @@ set -Eeuo pipefail
 # and a non-zero exit for missing dependencies, D-Bus errors, or bad replies.
 base=/modules/kdeconnect
 
-for command in gdbus sed grep tr kdeconnect-cli; do
+for command in gdbus sed grep tr; do
     command -v "$command" >/dev/null 2>&1 || exit 127
 done
+
+# kdeconnect-cli is optional: daemon discovery works without it; --refresh is best-effort.
 
 is_daemon_running() {
     gdbus call --session --dest org.freedesktop.DBus \
@@ -54,7 +56,7 @@ sanitize_field() {
 
 value() {
     # gdbus quotes strings as <'value'> and scalar values as <value>.
-    printf '%s' "$1" | sed -E "s/^\((true|false),\)$/\1/; s/^\(<('([^']|\\\\')*'|[^>]+)>.*$/\1/; s/^<'(.*)'>,?$/\1/; s/^<([^>]*)>,?$/\1/; s/^'(.*)'$/\1/"
+    printf '%s' "$1" | sed -E "s/^\((true|false),\)$/\1/; s/^\(<[[:space:]]*'(.*)',[[:space:]]*>,\)$/\1/; s/^\(<('([^']|\\\\')*'|[^>]+)>.*$/\1/; s/^<'(.*)'>,?$/\1/; s/^<([^>]*)>,?$/\1/; s/^'(.*)'$/\1/; s/^'(.*)',$/\1/"
 }
 
 ids=$(gdbus call --session --dest org.kde.kdeconnect --object-path "$base" \
@@ -80,14 +82,23 @@ fi
 is_address_reachable() {
     local addr=$1
     [[ -n "$addr" ]] || return 1
+    local probed=false
     # Pass the address as data; interpolating it into the shell program allows
     # a malformed or compromised D-Bus response to inject shell syntax.
-    if timeout 0.4 bash -c '>/dev/tcp/$1/1716' -- "$addr" 2>/dev/null; then
-        return 0
+    if command -v timeout >/dev/null 2>&1; then
+        probed=true
+        if timeout 0.4 bash -c '>/dev/tcp/$1/1716' -- "$addr" 2>/dev/null; then
+            return 0
+        fi
     fi
-    if ping -c 1 -W 1 "$addr" >/dev/null 2>&1; then
-        return 0
+    if command -v ping >/dev/null 2>&1; then
+        probed=true
+        if ping -c 1 -W 1 "$addr" >/dev/null 2>&1; then
+            return 0
+        fi
     fi
+    # No probe tools installed: fail open instead of marking every device offline.
+    [[ "$probed" == true ]] || return 0
     return 1
 }
 

@@ -25,7 +25,6 @@ Item {
     property alias remoteCommands: controller.remoteCommands
     property alias commandsLoading: controller.commandsLoading
     property alias pendingPairing: controller.pendingPairing
-    property alias capabilities: controller.capabilities
     property alias fileBusy: controller.fileBusy
     property alias tailscaleInstalled: controller.tailscaleInstalled
     property alias tailscaleRunning: controller.tailscaleRunning

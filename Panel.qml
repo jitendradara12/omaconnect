@@ -26,6 +26,7 @@ KeyboardPanel {
     readonly property var incomingRequest: service ? service.incomingPairRequest : null
     readonly property bool remoteCommandsVisible: !!(device && device.paired && device.reachable && device.capabilities && device.capabilities.commands && (!getSetting || getSetting("showRemoteCommands", true)))
     readonly property bool mediaPlayerVisible: !!(device && device.paired && device.reachable && device.capabilities && device.capabilities.media && (!getSetting || getSetting("showMediaPlayer", true)))
+    readonly property bool networkVisible: (!getSetting || getSetting("showTailscale", true))
 
     property string activeComposer: "none"
     property string draftPing: ""
@@ -116,6 +117,7 @@ KeyboardPanel {
 
 
     function requestUnpairConfirm(id) {
+        if (unpairConfirmingId && unpairConfirmingId !== id) cancelUnpairConfirm(unpairConfirmingId)
         unpairConfirmingId = id
         if (service && typeof service.setPendingPairing === "function") service.setPendingPairing(id, "unpair_confirm")
     }
@@ -147,11 +149,17 @@ KeyboardPanel {
     }
 
     function confirmUnpair(id) {
+        if (unpairConfirmingId && unpairConfirmingId !== id) return
         unpairConfirmingId = ""
         if (service) service.unpairDevice(id)
     }
 
     function openComposer(type) {
+        if (type !== "ping" && type !== "text") return
+        if (!service || !device || !device.paired || !device.reachable) return
+        var caps = device.capabilities || {}
+        if (type === "ping" && !caps.ping) return
+        if (type === "text" && !caps.text) return
         composerError = ""
         activeComposer = type
         if (type === "ping") {
@@ -170,9 +178,12 @@ KeyboardPanel {
     function closeComposer() {
         activeComposer = "none"
         composerError = ""
-        focusSection = "actions"
+        focusSection = availableActions.length > 0 ? "actions" : "devices"
         if (keyCatcher) keyCatcher.forceActiveFocus()
     }
+
+    onDraftPingChanged: if (composerSection && composerSection.pingInput && composerSection.pingInput.text !== draftPing) composerSection.pingInput.text = draftPing
+    onDraftTextChanged: if (composerSection && composerSection.textInput && composerSection.textInput.text !== draftText) composerSection.textInput.text = draftText
 
     function resetComposer() {
         activeComposer = "none"
@@ -296,6 +307,7 @@ KeyboardPanel {
             else openComposer("text")
         } else if (focusSection === "media" && service && device) {
             if (!mediaExpanded) toggleMediaExpanded()
+            else if (!mediaPlayerSection.hasMedia) return
             else if (mediaControlIndex === 0) service.mediaPrevious(device.id)
             else if (mediaControlIndex === 2) service.mediaNext(device.id)
             else service.mediaPlayPause(device.id)
@@ -337,14 +349,20 @@ KeyboardPanel {
             var key = String(value).toLowerCase()
             if (key === "r" && root.service) root.service.refresh(true)
             else if (key === "j" || key === "down") {
-                if (root.focusSection === "commands" && root.commandsExpanded) {
+                if (root.focusSection === "network") root.focusSection = "devices"
+                else if (root.focusSection === "commands" && root.commandsExpanded) {
                     var cmdsD = (root.service && root.service.remoteCommands) ? root.service.remoteCommands : []
                     if (cmdsD.length > 0 && root.commandSelectedIndex < cmdsD.length - 1) root.selectCommand(1)
+                    else if (root.networkVisible) root.focusSection = "network"
                     else root.focusSection = "devices"
                 }
-                else if (root.focusSection === "commands") root.focusSection = "devices"
+                else if (root.focusSection === "commands") {
+                    if (root.networkVisible) root.focusSection = "network"
+                    else root.focusSection = "devices"
+                }
                 else if (root.focusSection === "media") {
                     if (root.remoteCommandsVisible) root.focusSection = "commands"
+                    else if (root.networkVisible) root.focusSection = "network"
                     else root.focusSection = "devices"
                 }
                 else if (root.focusSection === "actions") {
@@ -352,12 +370,24 @@ KeyboardPanel {
                     if (actsD.length > 0 && root.actionSelectedIndex < actsD.length - 1) root.actionSelectedIndex++
                     else if (root.mediaPlayerVisible) root.focusSection = "media"
                     else if (root.remoteCommandsVisible) root.focusSection = "commands"
+                    else if (root.networkVisible) root.focusSection = "network"
                     else root.focusSection = "devices"
                 }
                 else root.select(1)
             }
             else if (key === "k" || key === "up") {
-                if (root.focusSection === "commands" && root.commandsExpanded) {
+                if (root.focusSection === "network") {
+                    if (root.remoteCommandsVisible) root.focusSection = "commands"
+                    else if (root.mediaPlayerVisible) root.focusSection = "media"
+                    else {
+                        var actsN = root.availableActions
+                        if (actsN.length > 0) {
+                            root.focusSection = "actions"
+                            root.actionSelectedIndex = actsN.length - 1
+                        } else root.focusSection = "devices"
+                    }
+                }
+                else if (root.focusSection === "commands" && root.commandsExpanded) {
                     if (root.commandSelectedIndex > 0) root.selectCommand(-1)
                     else {
                         if (root.mediaPlayerVisible) root.focusSection = "media"
@@ -403,6 +433,8 @@ KeyboardPanel {
                         root.focusSection = "media"
                     } else if (root.remoteCommandsVisible) {
                         root.focusSection = "commands"
+                    } else if (root.networkVisible) {
+                        root.focusSection = "network"
                     }
                 }
                 else if (root.focusSection === "actions") {
@@ -413,19 +445,46 @@ KeyboardPanel {
                         root.focusSection = "media"
                     } else if (root.remoteCommandsVisible) {
                         root.focusSection = "commands"
+                    } else if (root.networkVisible) {
+                        root.focusSection = "network"
                     } else {
                         root.focusSection = "devices"
                     }
                 }
                 else if (root.focusSection === "media") {
-                    if (root.mediaExpanded) root.mediaControlIndex = Math.min(2, root.mediaControlIndex + 1)
+                    if (root.mediaExpanded && root.mediaControlIndex < 2) root.mediaControlIndex++
+                    else if (root.mediaExpanded) {
+                        if (root.remoteCommandsVisible) root.focusSection = "commands"
+                        else if (root.networkVisible) root.focusSection = "network"
+                        else root.focusSection = "devices"
+                    }
                     else if (root.remoteCommandsVisible) root.focusSection = "commands"
+                    else if (root.networkVisible) root.focusSection = "network"
                     else root.focusSection = "devices"
                 }
-                else if (root.focusSection === "commands") root.focusSection = "devices"
+                else if (root.focusSection === "commands") {
+                    if (root.networkVisible) root.focusSection = "network"
+                    else root.focusSection = "devices"
+                }
+                else if (root.focusSection === "network") root.focusSection = "devices"
             }
             else if (key === "h" || key === "left") {
-                if (root.focusSection === "commands") {
+                if (root.focusSection === "network") {
+                    if (root.remoteCommandsVisible) {
+                        root.focusSection = "commands"
+                    } else if (root.mediaPlayerVisible) {
+                        root.focusSection = "media"
+                    } else {
+                        var availableNetH = root.availableActions
+                        if (availableNetH.length > 0) {
+                            root.focusSection = "actions"
+                            root.actionSelectedIndex = availableNetH.length - 1
+                        } else {
+                            root.focusSection = "devices"
+                        }
+                    }
+                }
+                else if (root.focusSection === "commands") {
                     if (root.mediaPlayerVisible) {
                         root.focusSection = "media"
                     } else {
@@ -439,8 +498,16 @@ KeyboardPanel {
                     }
                 }
                 else if (root.focusSection === "media") {
-                    if (root.mediaExpanded) {
-                        root.mediaControlIndex = Math.max(0, root.mediaControlIndex - 1)
+                    if (root.mediaExpanded && root.mediaControlIndex > 0) {
+                        root.mediaControlIndex--
+                    } else if (root.mediaExpanded) {
+                        var availableMedH0 = root.availableActions
+                        if (availableMedH0.length > 0) {
+                            root.focusSection = "actions"
+                            root.actionSelectedIndex = availableMedH0.length - 1
+                        } else {
+                            root.focusSection = "devices"
+                        }
                     } else {
                         var availableMedH = root.availableActions
                         if (availableMedH.length > 0) {
@@ -459,7 +526,8 @@ KeyboardPanel {
                     }
                 }
                 else if (root.focusSection === "devices") {
-                    if (root.remoteCommandsVisible) root.focusSection = "commands"
+                    if (root.networkVisible) root.focusSection = "network"
+                    else if (root.remoteCommandsVisible) root.focusSection = "commands"
                     else if (root.mediaPlayerVisible) root.focusSection = "media"
                     else {
                         var availableDevH = root.availableActions
@@ -486,9 +554,8 @@ KeyboardPanel {
                     if (pendU !== "removing") root.requestUnpairConfirm(devU.id)
                 }
             }
-            else if (key === "y" && root.service && root.service.selectedDeviceId && (root.unpairConfirmingId === root.service.selectedDeviceId || (root.service.pendingPairing && root.service.pendingPairing[root.service.selectedDeviceId] === "unpair_confirm"))) {
-                var targetIdY = root.service.selectedDeviceId
-                if (targetIdY) root.confirmUnpair(targetIdY)
+            else if (key === "y" && root.unpairConfirmingId) {
+                root.confirmUnpair(root.unpairConfirmingId)
             }
             else if ((key === "c" || key === "escape")) {
                 var targetIdC = root.unpairConfirmingId || (root.service ? root.service.selectedDeviceId : "")

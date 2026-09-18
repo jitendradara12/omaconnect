@@ -216,7 +216,7 @@ Column {
             Text {
                 visible: !!(panel.incomingRequest && panel.incomingRequest.verificationKey)
                 width: parent.width
-                text: "Verify on both devices: " + (root.service ? root.service.formatVerificationKey(panel.incomingRequest.verificationKey) : panel.incomingRequest.verificationKey)
+                text: "Verify on both devices: " + (panel.incomingRequest ? (root.service ? root.service.formatVerificationKey(panel.incomingRequest.verificationKey) : panel.incomingRequest.verificationKey) : "")
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall

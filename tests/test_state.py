@@ -1012,7 +1012,8 @@ class StateTests(unittest.TestCase):
     panel_source = (ROOT / "Panel.qml").read_text()
     self.assertIn("function selectDevice(id)", panel_source)
     self.assertIn("cancelUnpairConfirm(unpairConfirmingId)", panel_source)
-    self.assertIn("var targetIdY = root.service.selectedDeviceId", panel_source)
+    self.assertIn("root.confirmUnpair(root.unpairConfirmingId)", panel_source)
+    self.assertIn("if (unpairConfirmingId && unpairConfirmingId !== id) return", panel_source)
 
   def test_scan_and_picker_lifecycle_guards(self):
     controller_source = (ROOT / "KdeConnectController.qml").read_text()

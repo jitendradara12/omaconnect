@@ -34,7 +34,7 @@ Column {
         CursorSurface {
             width: Math.max(1, parent.width - (panel.networkExpanded ? refreshNetBtn.implicitWidth + Style.space(6) : 0))
             implicitHeight: headerRow.implicitHeight + Style.space(6)
-            hasCursor: panel.cursorActive && panel.focusSection === "network" && !panel.networkExpanded
+            hasCursor: panel.cursorActive && panel.focusSection === "network"
             radius: Style.cornerRadius
             foreground: root.foreground
             fill: Style.hoverFillFor(root.foreground, Color.accent)

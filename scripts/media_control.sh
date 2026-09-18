@@ -8,27 +8,16 @@ argument=${3:-}
 [[ "$operation" =~ ^(status|action|player)$ ]] || exit 64
 [[ -n "$device_id" && "$device_id" != *$'\t'* && "$device_id" != *$'\n'* && "$device_id" != *' '* && "$device_id" != */* ]] || exit 64
 
-for cmd in gdbus sed tr; do
+for cmd in gdbus; do
     command -v "$cmd" >/dev/null 2>&1 || exit 127
 done
 
 base="/modules/kdeconnect/devices/$device_id/mprisremote"
 
-property() {
-    local name=$1
-    gdbus call --session --dest org.kde.kdeconnect \
-        --object-path "$base" --method org.freedesktop.DBus.Properties.Get \
-        "org.kde.kdeconnect.device.mprisremote" "$name" 2>/dev/null || return 69
-}
-
-value() {
-    printf '%s' "$1" | sed -E "s/^\((true|false),\)$/\1/; s/^\(<('([^']|\\\\')*'|[^>]+)>.*$/\1/; s/^<'(.*)'>,?$/\1/; s/^<([^>]*)>,?$/\1/; s/^'(.*)'$/\1/"
-}
-
 case "$operation" in
     status)
-        if command -v python3 >/dev/null 2>&1; then
-            python3 - "$device_id" << 'PYEOF'
+        command -v python3 >/dev/null 2>&1 || exit 127
+        python3 - "$device_id" << 'PYEOF'
 import sys, json, subprocess, re
 
 device_id = sys.argv[1]
@@ -121,51 +110,6 @@ out = {
 }
 print(json.dumps(out))
 PYEOF
-        else
-            is_playing=$(value "$(property isPlaying 2>/dev/null)") || is_playing=false
-            title=$(value "$(property title 2>/dev/null)") || title=""
-            if [[ -z "$title" ]]; then
-                title=$(value "$(property nowPlaying 2>/dev/null)") || title=""
-            fi
-            artist=$(value "$(property artist 2>/dev/null)") || artist=""
-            album=$(value "$(property album 2>/dev/null)") || album=""
-            player=$(value "$(property player 2>/dev/null)") || player=""
-            album_art=$(value "$(property localAlbumArtUrl 2>/dev/null)") || album_art=""
-            if [[ -z "$album_art" ]]; then
-                album_art=$(value "$(property albumArtUrl 2>/dev/null)") || album_art=""
-            fi
-            if [[ -z "$album_art" ]]; then
-                album_art=$(value "$(property artUrl 2>/dev/null)") || album_art=""
-            fi
-            if [[ -z "$album_art" ]]; then
-                album_art=$(value "$(property albumArt 2>/dev/null)") || album_art=""
-            fi
-            raw_players=$(property playerList 2>/dev/null) || raw_players=""
-            players_json="[]"
-            if [[ -n "$raw_players" ]]; then
-                p_items=$(printf '%s' "$raw_players" | grep -o -E "'[^']+'|\"[^\"]+\"" | tr -d "'\"" || true)
-                if [[ -n "$p_items" ]]; then
-                    json_arr=""
-                    while IFS= read -r p; do
-                        [[ -n "$p" ]] || continue
-                        if [[ -n "$json_arr" ]]; then json_arr="$json_arr,"; fi
-                        json_arr="$json_arr\"${p//\"/\\\"}\""
-                    done <<< "$p_items"
-                    players_json="[$json_arr]"
-                fi
-            fi
-            if [[ -n "$player" && "$players_json" != *"\"$player\""* ]]; then
-                if [[ "$players_json" == "[]" ]]; then
-                    players_json="[\"${player//\"/\\\"}\"]"
-                else
-                    players_json="[\"${player//\"/\\\"}\",${players_json:1}"
-                fi
-            fi
-            gdbus call --session --dest org.kde.kdeconnect --object-path "$base" --method org.kde.kdeconnect.device.mprisremote.requestPlayerList >/dev/null 2>&1 || true
-            [[ "$is_playing" == true ]] || is_playing=false
-            printf '{"isPlaying":%s,"title":"%s","artist":"%s","album":"%s","player":"%s","playerList":%s,"albumArt":"%s"}\n' \
-                "$is_playing" "${title//\"/\\\"}" "${artist//\"/\\\"}" "${album//\"/\\\"}" "${player//\"/\\\"}" "$players_json" "${album_art//\"/\\\"}"
-        fi
         ;;
     action)
         action_name="$argument"
