@@ -64,7 +64,7 @@ KeyboardPanel {
         unpairConfirmingId = ""
         opened = false
     }
-    function toggle() { opened = !opened }
+    function toggle() { opened ? close() : open() }
     function closeForPopoutSwitch() { opened = false }
 
     function getSetting(key, defaultValue) {
@@ -97,6 +97,22 @@ KeyboardPanel {
             if (focusSection === "actions") focusSection = "devices"
         }
     }
+
+    Connections {
+        target: root.service
+        function onDevicesChanged() {
+            var list = root.service ? root.service.devices : []
+            if (!list.length) {
+                root.selectedIndex = 0
+                return
+            }
+            root.selectedIndex = Math.max(0, Math.min(list.length - 1, root.selectedIndex))
+        }
+    }
+
+    onMediaPlayerVisibleChanged: if (!mediaPlayerVisible && focusSection === "media") focusSection = availableActions.length > 0 ? "actions" : "devices"
+    onRemoteCommandsVisibleChanged: if (!remoteCommandsVisible && focusSection === "commands") focusSection = availableActions.length > 0 ? "actions" : "devices"
+    onNetworkVisibleChanged: if (!networkVisible && focusSection === "network") focusSection = availableActions.length > 0 ? "actions" : "devices"
 
     function triggerAction(actionId) {
         if (!service || !device) return
@@ -131,6 +147,11 @@ KeyboardPanel {
         if (!service) return
         if (unpairConfirmingId && unpairConfirmingId !== id) cancelUnpairConfirm(unpairConfirmingId)
         unpairConfirmingId = ""
+        resetComposer()
+        commandSelectedIndex = 0
+        commandsExpanded = false
+        mediaControlIndex = 1
+        if (focusSection === "ping" || focusSection === "text") focusSection = availableActions.length > 0 ? "actions" : "devices"
         service.selectDevice(id)
         var list = service.devices || []
         for (var i = 0; i < list.length; i++) {
@@ -156,10 +177,34 @@ KeyboardPanel {
 
     function openComposer(type) {
         if (type !== "ping" && type !== "text") return
-        if (!service || !device || !device.paired || !device.reachable) return
+        if (!service || !device || !device.paired || !device.reachable) {
+            composerError = "Device must be paired and reachable"
+            if (service) {
+                service.actionState = "blocked"
+                service.actionError = "Device must be paired and reachable"
+                service.actionMessage = ""
+            }
+            return
+        }
         var caps = device.capabilities || {}
-        if (type === "ping" && !caps.ping) return
-        if (type === "text" && !caps.text) return
+        if (type === "ping" && !caps.ping) {
+            composerError = "Ping not supported by device"
+            if (service) {
+                service.actionState = "blocked"
+                service.actionError = "Ping not supported by device"
+                service.actionMessage = ""
+            }
+            return
+        }
+        if (type === "text" && !caps.text) {
+            composerError = "Text share not supported by device"
+            if (service) {
+                service.actionState = "blocked"
+                service.actionError = "Text share not supported by device"
+                service.actionMessage = ""
+            }
+            return
+        }
         composerError = ""
         activeComposer = type
         if (type === "ping") {
@@ -306,6 +351,7 @@ KeyboardPanel {
             if (activeComposer === "text") submitText()
             else openComposer("text")
         } else if (focusSection === "media" && service && device) {
+            if (!device.paired || !device.reachable || !device.capabilities || !device.capabilities.media) return
             if (!mediaExpanded) toggleMediaExpanded()
             else if (!mediaPlayerSection.hasMedia) return
             else if (mediaControlIndex === 0) service.mediaPrevious(device.id)
@@ -555,7 +601,9 @@ KeyboardPanel {
                 }
             }
             else if (key === "y" && root.unpairConfirmingId) {
-                root.confirmUnpair(root.unpairConfirmingId)
+                var listY = root.service ? root.service.devices : []
+                var devY = listY[root.selectedIndex]
+                if (devY && devY.id === root.unpairConfirmingId) root.confirmUnpair(root.unpairConfirmingId)
             }
             else if ((key === "c" || key === "escape")) {
                 var targetIdC = root.unpairConfirmingId || (root.service ? root.service.selectedDeviceId : "")

@@ -6,7 +6,7 @@ target=${2:-}
 base=/modules/kdeconnect
 
 [[ "$operation" == add || "$operation" == remove ]] || exit 64
-[[ -n "$target" && "$target" != *$'\t'* && "$target" != *$'\n'* && "$target" != *' '* && "$target" != */* ]] || exit 64
+[[ -n "$target" && "$target" != -* && "$target" != *$'\t'* && "$target" != *$'\n'* && "$target" != *' '* && "$target" != */* ]] || exit 64
 
 for dependency in gdbus busctl sed tr; do
     command -v "$dependency" >/dev/null 2>&1 || exit 127

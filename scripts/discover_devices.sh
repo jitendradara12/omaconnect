@@ -93,9 +93,19 @@ is_address_reachable() {
     fi
     if command -v ping >/dev/null 2>&1; then
         probed=true
-        if ping -c 1 -W 1 "$addr" >/dev/null 2>&1; then
-            return 0
-        fi
+        case "$addr" in
+            *:*)
+                # ponytail: IPv6 needs explicit -6 on inetutils ping
+                if ping -6 -c 1 -W 1 "$addr" >/dev/null 2>&1 || ping -c 1 -W 1 "$addr" >/dev/null 2>&1; then
+                    return 0
+                fi
+                ;;
+            *)
+                if ping -c 1 -W 1 "$addr" >/dev/null 2>&1; then
+                    return 0
+                fi
+                ;;
+        esac
     fi
     # No probe tools installed: fail open instead of marking every device offline.
     [[ "$probed" == true ]] || return 0

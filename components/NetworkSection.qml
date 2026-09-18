@@ -74,6 +74,7 @@ Column {
                 Text {
                     visible: !panel.networkExpanded && !!(root.service && root.service.tailscaleInstalled)
                     text: {
+                        if (!root.service) return ""
                         if (root.service.tailscaleLoading) return "Checking…"
                         return root.service.tailscaleStatus
                     }
