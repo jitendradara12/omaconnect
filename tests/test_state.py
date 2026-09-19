@@ -1476,29 +1476,9 @@ class StateTests(unittest.TestCase):
 
   def test_discovery_script_reachability_verification(self):
     discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
-    self.assertIn("is_address_reachable()", discovery_source)
-    self.assertIn("reachableAddresses", discovery_source)
-    self.assertIn("has_alive_addr", discovery_source)
-
-  def test_discovery_reachability_does_not_interpolate_address_into_shell(self):
-    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
-    self.assertIn("bash -c '>/dev/tcp/$1/1716' -- \"$addr\"", discovery_source)
-    self.assertNotIn('bash -c ">/dev/tcp/$addr/1716"', discovery_source)
-
-    marker = "OMACONNECT_INJECTION_TEST_MARKER"
-    hostile_address = f"127.0.0.1/1716; printf {marker} >&2 #"
-    result = subprocess.run(
-        [
-            "bash",
-            "-c",
-            "timeout 0.4 bash -c '>/dev/tcp/$1/1716' -- \"$addr\"",
-        ],
-        env={**os.environ, "addr": hostile_address},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    self.assertNotIn(marker, result.stderr)
+    self.assertIn("org.kde.kdeconnect.device isReachable", discovery_source)
+    self.assertNotIn("is_address_reachable()", discovery_source)
+    self.assertNotIn("/dev/tcp", discovery_source)
 
   def test_device_section_offline_and_empty_states_contracts(self):
     device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
