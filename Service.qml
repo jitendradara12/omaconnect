@@ -26,6 +26,9 @@ Item {
     property alias commandsLoading: controller.commandsLoading
     property alias pendingPairing: controller.pendingPairing
     property alias fileBusy: controller.fileBusy
+    property alias fileTransferState: controller.fileTransferState
+    property alias fileTransferMessage: controller.fileTransferMessage
+    property alias fileTransferError: controller.fileTransferError
     property alias tailscaleInstalled: controller.tailscaleInstalled
     property alias tailscaleRunning: controller.tailscaleRunning
     property alias tailscaleLoading: controller.tailscaleLoading
@@ -54,6 +57,7 @@ Item {
     function sendClipboard(id) { return controller.sendClipboard(id) }
     function startFileSelection(id) { return controller.startFileSelection(id) }
     function cancelFileSelection() { return controller.cancelFileSelection() }
+    function cancelFileTransfer() { return controller.cancelFileTransfer() }
     function sendFile(id, path) { return controller.sendFile(id, path) }
     function openSmsApp(id) { return controller.openSmsApp(id) }
     function openKdeConnectApp() { return controller.openKdeConnectApp() }

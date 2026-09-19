@@ -118,7 +118,10 @@ KeyboardPanel {
         if (!service || !device) return
         if (actionId === "ring") service.ringDevice(device.id)
         else if (actionId === "clipboard") service.sendClipboard(device.id)
-        else if (actionId === "file") service.startFileSelection(device.id)
+        else if (actionId === "file") {
+            if (service.fileBusy) service.cancelFileTransfer()
+            else service.startFileSelection(device.id)
+        }
         else if (actionId === "sms") service.openSmsApp(device.id)
         else if (actionId === "ping") {
             if (activeComposer === "ping") closeComposer()

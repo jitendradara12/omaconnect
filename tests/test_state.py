@@ -1868,6 +1868,34 @@ class StateTests(unittest.TestCase):
     self.assertIn("Keys.onEscapePressed", network_source)
 
 
+  def test_file_transfer_concurrency_decoupling(self):
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    self.assertIn("fileTransferProcess", controller_source)
+    self.assertIn("function cancelFileTransfer()", controller_source)
+    self.assertIn("fileTransferState", controller_source)
+    self.assertIn("fileTransferGeneration", controller_source)
+    # Ensure startAction does not block on file transfers
+    self.assertNotIn("fileTransferProcess.running", controller_source.split("function startAction")[1].split("function ")[0])
+    # Check ActionToolbar enables quick actions while file transfer is active
+    toolbar_source = (ROOT / "components" / "ActionToolbar.qml").read_text()
+    self.assertIn('modelData === "file"', toolbar_source)
+    self.assertIn('"Cancel File"', toolbar_source)
+    # Check DeviceSection status banner handles file transfer status
+    device_section_source = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertIn("root.service.fileTransferError", device_section_source)
+    self.assertIn("root.service.fileTransferMessage", device_section_source)
+    # Check Service exports fileTransfer aliases and cancelFileTransfer
+    service_source = (ROOT / "Service.qml").read_text()
+    self.assertIn("cancelFileTransfer", service_source)
+    self.assertIn("fileTransferState", service_source)
+    # Check canAct and filePicker cancellation guards
+    self.assertIn("!canAct(id)", controller_source.split("function sendFile")[1].split("function ")[0])
+    self.assertIn("filePickerProcess.running", controller_source.split("function cancelFileTransfer")[1].split("function ")[0])
+    self.assertIn("fileTransferGeneration += 1", controller_source.split("function selectDevice")[1].split("function ")[0])
+    self.assertIn("fileTransferDismissTimer.stop()", controller_source.split("Component.onDestruction:")[1])
+    self.assertIn("!root.service.fileBusy", device_section_source)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

@@ -14,6 +14,9 @@ Item {
     property string actionState: "idle"
     property string actionMessage: ""
     property string actionError: ""
+    property string fileTransferState: "idle"
+    property string fileTransferMessage: ""
+    property string fileTransferError: ""
 
     Timer {
         id: actionDismissTimer
@@ -22,6 +25,20 @@ Item {
         onTriggered: {
             root.actionMessage = ""
             root.actionError = ""
+        }
+    }
+
+    Timer {
+        id: fileTransferDismissTimer
+        interval: 4000
+        repeat: false
+        onTriggered: {
+            if (root.fileBusy || root.fileTransferState === "transferring") return
+            root.fileTransferMessage = ""
+            root.fileTransferError = ""
+            if (root.fileTransferState === "accepted" || root.fileTransferState === "cancelled" || root.fileTransferState === "failed") {
+                root.fileTransferState = "idle"
+            }
         }
     }
 
@@ -34,12 +51,33 @@ Item {
         if (actionMessage !== "" || actionError !== "") actionDismissTimer.restart()
         else actionDismissTimer.stop()
     }
+
+    onFileTransferMessageChanged: {
+        if (root.fileBusy || root.fileTransferState === "transferring") {
+            fileTransferDismissTimer.stop()
+        } else if (fileTransferMessage !== "" || fileTransferError !== "") {
+            fileTransferDismissTimer.restart()
+        } else {
+            fileTransferDismissTimer.stop()
+        }
+    }
+
+    onFileTransferErrorChanged: {
+        if (root.fileBusy || root.fileTransferState === "transferring") {
+            fileTransferDismissTimer.stop()
+        } else if (fileTransferMessage !== "" || fileTransferError !== "") {
+            fileTransferDismissTimer.restart()
+        } else {
+            fileTransferDismissTimer.stop()
+        }
+    }
     property string selectedDeviceId: ""
     property var devices: []
     property var remoteCommands: []
     property bool commandsLoading: false
     property int generation: 0
     property int actionGeneration: 0
+    property int fileTransferGeneration: 0
     property bool scanQueued: false
     property var pendingPairing: ({})
     property var pairingRequestTimes: ({})
@@ -95,13 +133,19 @@ Item {
         actionMessage = ""
         actionError = ""
         fileBusy = false
+        fileTransferState = "idle"
+        fileTransferMessage = ""
+        fileTransferError = ""
         mediaState = emptyMediaState()
         mediaLoading = false
         mediaRefreshPending = false
+        actionGeneration += 1
+        fileTransferGeneration += 1
         if (mediaStatusProcess.running) mediaStatusProcess.running = false
         if (mediaActionProcess.running) mediaActionProcess.running = false
         if (mediaPlayerProcess.running) mediaPlayerProcess.running = false
         if (actionProcess.running) actionProcess.running = false
+        if (fileTransferProcess.running) fileTransferProcess.running = false
         if (filePickerProcess.running) filePickerProcess.running = false
         remoteCommands = []
         commandsLoading = false
@@ -116,6 +160,9 @@ Item {
         actionMessage = ""
         actionError = ""
         fileBusy = false
+        fileTransferState = "idle"
+        fileTransferMessage = ""
+        fileTransferError = ""
     }
 
     function safeError(exitCode, operation) {
@@ -563,7 +610,6 @@ Item {
             actionState = "blocked"
             actionError = busy ? "Another action is already running" : "Device must be paired and reachable"
             actionMessage = ""
-            if (!filePickerProcess.running) fileBusy = false
             return false
         }
         actionGeneration += 1
@@ -575,7 +621,6 @@ Item {
         actionState = "running"
         actionMessage = "Requesting " + operation
         actionError = ""
-        fileBusy = operation === "file transfer"
         actionProcess.running = true
         return true
     }
@@ -670,6 +715,16 @@ Item {
         actionError = ""
     }
 
+    function cancelFileTransfer() {
+        fileTransferGeneration += 1
+        if (filePickerProcess.running) cancelFileSelection()
+        if (fileTransferProcess.running) fileTransferProcess.running = false
+        fileBusy = false
+        fileTransferState = "cancelled"
+        fileTransferMessage = "File transfer cancelled"
+        fileTransferError = ""
+    }
+
     function sendFile(id, path) {
         var value = String(path || "").trim()
         if (value.indexOf("file://") === 0) {
@@ -679,16 +734,30 @@ Item {
             } catch (e) {}
         }
         var device = deviceById(id)
-        if (!value || value.indexOf("\u0000") !== -1 || !device || !device.capabilities.file) {
+        if (!value || value.indexOf("\u0000") !== -1 || !device || !canAct(id) || !device.capabilities.file) {
             fileBusy = false
-            // ponytail: don't strand busy/Selecting-file UI when device vanished mid-picker
-            actionState = "failed"
-            actionMessage = ""
-            actionError = (!device || (device && !canAct(id))) ? "Device must be paired and reachable" : "File transfer not supported by device"
-            if (!value || value.indexOf("\u0000") !== -1) actionError = "File transfer failed"
+            fileTransferState = "failed"
+            fileTransferMessage = ""
+            fileTransferError = (!device || (device && !canAct(id))) ? "Device must be paired and reachable" : "File transfer not supported by device"
+            if (!value || value.indexOf("\u0000") !== -1) fileTransferError = "File transfer failed"
             return false
         }
-        return startAction(id, ["kdeconnect-cli", "-d", String(id), "--share", value], "File sent", "file transfer")
+        if (fileTransferProcess.running) {
+            fileTransferState = "blocked"
+            fileTransferError = "A file transfer is already running"
+            fileTransferMessage = ""
+            return false
+        }
+        fileTransferGeneration += 1
+        fileTransferProcess.targetGeneration = fileTransferGeneration
+        fileTransferProcess.targetDeviceId = String(id)
+        fileTransferProcess.command = ["kdeconnect-cli", "-d", String(id), "--share", value]
+        fileBusy = true
+        fileTransferState = "transferring"
+        fileTransferMessage = "Sending file..."
+        fileTransferError = ""
+        fileTransferProcess.running = true
+        return true
     }
 
     function fetchRemoteCommands(id) {
@@ -913,10 +982,23 @@ Item {
         stderr: StdioCollector { waitForEnd: true }
         onExited: function(code) {
             if (targetGeneration !== root.actionGeneration || targetDeviceId !== root.selectedDeviceId) return
-            root.fileBusy = false
             root.actionState = code === 0 ? "accepted" : "failed"
             root.actionMessage = code === 0 ? acceptedMessage : ""
             root.actionError = code === 0 ? "" : root.safeError(code, operation)
+        }
+    }
+
+    Process {
+        id: fileTransferProcess
+        property string targetDeviceId: ""
+        property int targetGeneration: 0
+        stderr: StdioCollector { waitForEnd: true }
+        onExited: function(code) {
+            root.fileBusy = false
+            if (targetGeneration !== root.fileTransferGeneration || targetDeviceId !== root.selectedDeviceId) return
+            root.fileTransferState = code === 0 ? "accepted" : "failed"
+            root.fileTransferMessage = code === 0 ? "File sent" : ""
+            root.fileTransferError = code === 0 ? "" : root.safeError(code, "file transfer")
         }
     }
 
@@ -1184,5 +1266,5 @@ Item {
     Timer { id: signalRestart; repeat: false; onTriggered: if (!signalProcess.running) signalProcess.running = true }
     Timer { interval: 15000; running: !signalProcess.running; repeat: true; onTriggered: root.refresh() }
     Component.onCompleted: { root.refresh(); root.refreshTailscale(); signalProcess.running = true }
-    Component.onDestruction: { actionDismissTimer.stop(); dbusDebounceTimer.stop(); mediaDebounceTimer.stop(); pairingWatchdogTimer.stop(); monitorStabilityTimer.stop(); signalRestart.stop(); signalProcess.running = false; scanProcess.running = false; commandsProcess.running = false; actionProcess.running = false; pairProcess.running = false; pairResponseProcess.running = false; filePickerProcess.running = false; tailscaleProcess.running = false; addressProcess.running = false; firewallProcess.running = false; installProcess.running = false; appProcess.running = false; mediaStatusProcess.running = false; mediaActionProcess.running = false; mediaPlayerProcess.running = false }
+    Component.onDestruction: { actionDismissTimer.stop(); fileTransferDismissTimer.stop(); dbusDebounceTimer.stop(); mediaDebounceTimer.stop(); pairingWatchdogTimer.stop(); monitorStabilityTimer.stop(); signalRestart.stop(); signalProcess.running = false; scanProcess.running = false; commandsProcess.running = false; actionProcess.running = false; fileTransferProcess.running = false; pairProcess.running = false; pairResponseProcess.running = false; filePickerProcess.running = false; tailscaleProcess.running = false; addressProcess.running = false; firewallProcess.running = false; installProcess.running = false; appProcess.running = false; mediaStatusProcess.running = false; mediaActionProcess.running = false; mediaPlayerProcess.running = false }
 }

@@ -130,11 +130,11 @@ Column {
 
     Rectangle {
         id: statusBanner
-        visible: !!((root.service && (root.service.actionError || root.service.actionMessage)) || (root.panel && root.panel.composerError))
+        visible: !!((root.service && (root.service.actionError || root.service.actionMessage || root.service.fileTransferError || root.service.fileTransferMessage)) || (root.panel && root.panel.composerError))
         width: parent.width
         implicitHeight: Math.max(bannerText.implicitHeight, Style.space(18)) + Style.space(8)
         radius: Style.cornerRadius
-        color: ((root.service && root.service.actionError) || (root.panel && root.panel.composerError))
+        color: ((root.service && (root.service.actionError || root.service.fileTransferError)) || (root.panel && root.panel.composerError))
             ? Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.15)
             : Style.hoverFillFor(root.foreground, Color.accent)
 
@@ -147,11 +147,13 @@ Column {
             anchors.verticalCenter: parent.verticalCenter
             text: {
                 if (root.service && root.service.actionError) return root.service.actionError
+                if (root.service && root.service.fileTransferError) return root.service.fileTransferError
                 if (root.panel && root.panel.composerError) return root.panel.composerError
                 if (root.service && root.service.actionMessage) return root.service.actionMessage
+                if (root.service && root.service.fileTransferMessage) return root.service.fileTransferMessage
                 return ""
             }
-            color: ((root.service && root.service.actionError) || (root.panel && root.panel.composerError)) ? Color.urgent : root.foreground
+            color: ((root.service && (root.service.actionError || root.service.fileTransferError)) || (root.panel && root.panel.composerError)) ? Color.urgent : root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight
@@ -169,6 +171,10 @@ Column {
                 if (root.service) {
                     root.service.actionMessage = ""
                     root.service.actionError = ""
+                    if (!root.service.fileBusy) {
+                        root.service.fileTransferMessage = ""
+                        root.service.fileTransferError = ""
+                    }
                 }
                 if (root.panel) {
                     root.panel.composerError = ""
@@ -178,7 +184,7 @@ Column {
             Text {
                 anchors.centerIn: parent
                 text: "✕"
-                color: ((root.service && root.service.actionError) || (root.panel && root.panel.composerError)) ? Color.urgent : root.foreground
+                color: ((root.service && (root.service.actionError || root.service.fileTransferError)) || (root.panel && root.panel.composerError)) ? Color.urgent : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 opacity: parent.pressed ? 0.6 : 0.85
