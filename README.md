@@ -87,3 +87,11 @@ omarchy plugin update omaconnect
 ```bash
 omarchy plugin remove omaconnect
 ```
+## Star History
+
+<a href="https://www.star-history.com/?repos=jitendradara12%2Fomaconnect&type=date&releases=&legend=bottom-right">
+ <picture>
+   <source  srcset="https://api.star-history.com/chart?repos=jitendradara12/omaconnect&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=jitendradara12/omaconnect&type=date&legend=bottom-right" />
+ </picture>
+</a>
