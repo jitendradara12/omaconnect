@@ -493,6 +493,21 @@ class PairingState:
         self.action_message = ""
         self.action_error = "Pairing timed out or rejected"
 
+    def check_watchdog(self, current_time):
+        timed_out = []
+        for dev_id, state in list(self.pending_pairing.items()):
+            if state == "requesting":
+                req_time = self.pairing_request_times.get(dev_id, 0)
+                if current_time - req_time >= 30000:
+                    del self.pending_pairing[dev_id]
+                    self.pairing_request_times.pop(dev_id, None)
+                    timed_out.append(dev_id)
+        if self.selected_device_id in timed_out:
+            self.action_state = "failed"
+            self.action_message = ""
+            self.action_error = "Pairing timed out or rejected"
+        return timed_out
+
     def request_unpair_confirm(self, device_id):
         dev = next((d for d in self.devices if d["id"] == device_id), None)
         if not dev or not dev.get("paired") or not dev.get("capabilities", {}).get("pair"):
@@ -897,6 +912,37 @@ class StateTests(unittest.TestCase):
 
     self.assertEqual(state.selected_device_id, "dev-2")
 
+  def test_multi_device_pairing_watchdog_isolation(self):
+    dev1 = parse_device("DEVICE\tdev-1\tPhone One\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery,kdeconnect_ping")
+    dev2 = parse_device("DEVICE\tdev-2\tPhone Two\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery,kdeconnect_ping")
+    state = PairingState(devices=[dev1, dev2], selected_device_id="dev-1")
+
+    self.assertTrue(state.pair_device("dev-1", timestamp=1000))
+    self.assertEqual(state.pending_pairing.get("dev-1"), "requesting")
+    self.assertEqual(state.pairing_request_times.get("dev-1"), 1000)
+
+    state.select_device("dev-2")
+    self.assertTrue(state.pair_device("dev-2", timestamp=20000))
+    self.assertEqual(state.pending_pairing.get("dev-2"), "requesting")
+    self.assertEqual(state.pairing_request_times.get("dev-2"), 20000)
+
+    timed_out = state.check_watchdog(30000)
+    self.assertEqual(timed_out, [])
+    self.assertEqual(state.pending_pairing.get("dev-1"), "requesting")
+    self.assertEqual(state.pending_pairing.get("dev-2"), "requesting")
+
+    timed_out = state.check_watchdog(32000)
+    self.assertEqual(timed_out, ["dev-1"])
+    self.assertNotIn("dev-1", state.pending_pairing)
+    self.assertEqual(state.pending_pairing.get("dev-2"), "requesting")
+
+    state.select_device("dev-2")
+    timed_out2 = state.check_watchdog(51000)
+    self.assertEqual(timed_out2, ["dev-2"])
+    self.assertNotIn("dev-2", state.pending_pairing)
+    self.assertEqual(state.action_state, "failed")
+    self.assertEqual(state.action_error, "Pairing timed out or rejected")
+
   def test_pairing_contracts(self):
     source = (ROOT / "KdeConnectController.qml").read_text()
     self.assertIn("setPendingPairing", source)
@@ -907,6 +953,8 @@ class StateTests(unittest.TestCase):
     self.assertIn('"Device unpaired"', source)
     self.assertIn('"Pairing timed out or rejected"', source)
     self.assertIn("pairingWatchdogTimer", source)
+    self.assertIn("root.pairingRequestTimes[devId]", source)
+    self.assertIn("now - reqTime >= 30000", source)
 
     ui_source = (ROOT / "Panel.qml").read_text() + "\n" + "\n".join(p.read_text() for p in (ROOT / "components").glob("*.qml"))
     self.assertIn("unpairConfirmingId", ui_source)

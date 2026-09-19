@@ -845,7 +845,7 @@ Item {
         actionState = "accepted"
         actionMessage = "Pair request sent"
         actionError = ""
-        pairingWatchdogTimer.restart()
+        if (!pairingWatchdogTimer.running) pairingWatchdogTimer.start()
         pairProcess.targetDeviceId = String(id)
         pairProcess.command = ["kdeconnect-cli", "-d", String(id), "--pair"]
         pairProcess.running = true
@@ -1040,8 +1040,15 @@ Item {
             if (isPair) {
                 if (code === 0) root.setPendingPairing(targetDeviceId, "requesting")
                 else {
-                    pairingWatchdogTimer.stop()
                     root.setPendingPairing(targetDeviceId, "")
+                    var stillRequesting = false
+                    for (var pendingId in root.pendingPairing) {
+                        if (root.pendingPairing[pendingId] === "requesting") {
+                            stillRequesting = true
+                            break
+                        }
+                    }
+                    if (!stillRequesting) pairingWatchdogTimer.stop()
                 }
             } else {
                 root.setPendingPairing(targetDeviceId, "")
@@ -1086,20 +1093,29 @@ Item {
 
     Timer {
         id: pairingWatchdogTimer
-        interval: 30000
-        repeat: false
+        interval: 1000
+        repeat: true
         onTriggered: {
-            var selectedHadPending = !!(root.selectedDeviceId && root.pendingPairing[root.selectedDeviceId] === "requesting")
+            var now = Date.now()
+            var anyRequesting = false
+            var timedOutSelected = false
             for (var devId in root.pendingPairing) {
                 if (root.pendingPairing[devId] === "requesting") {
-                    root.setPendingPairing(devId, "")
+                    var reqTime = root.pairingRequestTimes[devId] || 0
+                    if (now - reqTime >= 30000) {
+                        root.setPendingPairing(devId, "")
+                        if (devId === root.selectedDeviceId) timedOutSelected = true
+                    } else {
+                        anyRequesting = true
+                    }
                 }
             }
-            if (selectedHadPending) {
+            if (timedOutSelected) {
                 root.actionState = "failed"
                 root.actionMessage = ""
                 root.actionError = "Pairing timed out or rejected"
             }
+            if (!anyRequesting) pairingWatchdogTimer.stop()
         }
     }
 
