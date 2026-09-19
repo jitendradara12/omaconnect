@@ -152,6 +152,7 @@ Item {
         if (commandsProcess.running) commandsProcess.running = false
         if (next.paired && next.reachable && next.capabilities && next.capabilities.media) {
             fetchMediaStatus(next.id)
+            requestPlayerList(next.id)
         }
     }
 
@@ -553,6 +554,9 @@ Item {
                     mediaState = emptyMediaState()
                     mediaLoading = false
                     mediaRefreshPending = false
+                } else if (current.paired && current.reachable && !mediaState.player && !mediaState.title && mediaState.playerList.length === 0 && !mediaLoading) {
+                    fetchMediaStatus(current.id)
+                    requestPlayerList(current.id)
                 }
             }
         }
@@ -583,7 +587,24 @@ Item {
         }
         if (!stillRequesting) pairingWatchdogTimer.stop()
         if (!deviceById(selectedDeviceId)) {
-            if (next.length) selectDevice(next[0].id)
+            if (next.length) {
+                var preferred = null
+                for (var d = 0; d < next.length; d++) {
+                    if (next[d].paired && next[d].reachable) {
+                        preferred = next[d]
+                        break
+                    }
+                }
+                if (!preferred) {
+                    for (var d2 = 0; d2 < next.length; d2++) {
+                        if (next[d2].paired) {
+                            preferred = next[d2]
+                            break
+                        }
+                    }
+                }
+                selectDevice((preferred || next[0]).id)
+            }
             else clearActionState()
         }
         daemonAvailable = scanProcess.exitCode === 0
@@ -1293,13 +1314,19 @@ Item {
             if (isCurrent && code === 0 && stdout.text.trim()) {
                 try {
                     var parsed = JSON.parse(stdout.text.trim())
+                    var parsedPlayerList = Array.isArray(parsed.playerList) ? parsed.playerList : []
+                    var activePlayer = String(parsed.player || "")
+                    if (!activePlayer && parsedPlayerList.length > 0) {
+                        activePlayer = parsedPlayerList[0]
+                        root.mediaSelectPlayer(targetDeviceId, activePlayer)
+                    }
                     root.mediaState = {
                         isPlaying: (root.mediaActionProcess.running && root.mediaState) ? root.mediaState.isPlaying : (parsed.isPlaying === true),
                         title: String(parsed.title || ""),
                         artist: String(parsed.artist || ""),
                         album: String(parsed.album || ""),
-                        player: String(parsed.player || ""),
-                        playerList: Array.isArray(parsed.playerList) ? parsed.playerList : [],
+                        player: activePlayer,
+                        playerList: parsedPlayerList,
                         albumArt: String(parsed.albumArt || "")
                     }
                 } catch (e) {

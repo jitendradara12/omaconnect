@@ -469,7 +469,10 @@ class PairingState:
                 if self.pending_pairing.get(dev["id"]) in ("removing", "unpair_confirm"):
                     del self.pending_pairing[dev["id"]]
         if not any(d["id"] == self.selected_device_id for d in self.devices):
-            self.selected_device_id = self.devices[0]["id"] if self.devices else ""
+            preferred = next((d for d in self.devices if d.get("paired") and d.get("reachable")), None)
+            if not preferred:
+                preferred = next((d for d in self.devices if d.get("paired")), None)
+            self.selected_device_id = (preferred or self.devices[0])["id"] if self.devices else ""
         return True
 
     def pair_device(self, device_id, timestamp=0):
@@ -2122,10 +2125,104 @@ esac
       self.assertTrue(data["isPlaying"])
       self.assertEqual(data["title"], "Sweet Child O' Mine")
 
+  def test_media_player_multiline_and_empty_player_fallback(self):
+    script_path = ROOT / "scripts" / "media_control.sh"
+    # Case 1: Empty player but playerList has entries -> defaults to first player and sets D-Bus property
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text(r"""#!/usr/bin/env bash
+if [[ "$*" == *"Properties.GetAll"* ]]; then
+  cat << 'EOF'
+({'album': <''>, 'artist': <''>, 'isPlaying': <false>, 'player': <''>, 'playerList': <['Spotify', 'VLC']>},)
+EOF
+elif [[ "$*" == *"Properties.Set"* ]]; then
+  echo "SET_CALLED: $*" >> /tmp/gdbus_set_test.log
+  exit 0
+else
+  printf "(<''>,)\n"
+fi
+""")
+      _ = gdbus.chmod(0o755)
+      set_log = Path("/tmp/gdbus_set_test.log")
+      if set_log.exists():
+        set_log.unlink()
+      result = subprocess.run(
+          ["bash", str(script_path), "status", "dev-1"],
+          capture_output=True,
+          text=True,
+          check=False,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(result.returncode, 0, result.stderr)
+      data = json.loads(result.stdout)
+      self.assertEqual(data["player"], "Spotify")
+      self.assertEqual(data["playerList"], ["Spotify", "VLC"])
+      self.assertTrue(set_log.exists())
+      self.assertIn("Spotify", set_log.read_text())
+      if set_log.exists():
+        set_log.unlink()
+
+    # Case 2: Multiline title and multiline playerList
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text(r"""#!/usr/bin/env bash
+case "$*" in
+  *GetAll*) cat << 'EOF'
+({
+  'album': <'Live Concert'>,
+  'artist': <'The Beatles'>,
+  'isPlaying': <true>,
+  'player': <'Spotify'>,
+  'playerList': <[
+    'Spotify',
+    'Audacious'
+  ]>,
+  'title': <'A Day In The Life
+(Take 1)'>
+},)
+EOF
+  ;;
+  *) printf "(<' '>,)\n" ;;
+esac
+""")
+      _ = gdbus.chmod(0o755)
+      result = subprocess.run(
+          ["bash", str(script_path), "status", "dev-1"],
+          capture_output=True,
+          text=True,
+          check=False,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(result.returncode, 0, result.stderr)
+      data = json.loads(result.stdout)
+      self.assertTrue(data["isPlaying"])
+      self.assertEqual(data["title"], "A Day In The Life\n(Take 1)")
+      self.assertEqual(data["playerList"], ["Spotify", "Audacious"])
+
+  def test_device_selection_prioritizes_paired_and_reachable(self):
+    unpaired = parse_device("DEVICE\tdev-unpaired\tDesktop\tdesktop\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
+    offline = parse_device("DEVICE\tdev-offline\tTablet\ttablet\ttrue\tfalse\t50\tfalse\tkdeconnect_battery")
+    paired_online = parse_device("DEVICE\tdev-paired\tPhone\tphone\ttrue\ttrue\t80\ttrue\tkdeconnect_battery,kdeconnect_mprisremote")
+
+    state = PairingState()
+    state.selected_device_id = ""
+    state.devices = []
+    state.apply_scan([
+        "DEVICE\tdev-unpaired\tDesktop\tdesktop\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery",
+        "DEVICE\tdev-offline\tTablet\ttablet\ttrue\tfalse\t50\tfalse\tkdeconnect_battery",
+        "DEVICE\tdev-paired\tPhone\tphone\ttrue\ttrue\t80\ttrue\tkdeconnect_battery,kdeconnect_mprisremote",
+    ], state.generation)
+
+    self.assertEqual(state.selected_device_id, "dev-paired")
+
   def test_media_player_qml_contracts_and_components(self):
     controller_source = (ROOT / "KdeConnectController.qml").read_text()
     self.assertIn("function fetchMediaStatus(id)", controller_source)
     self.assertIn("function requestPlayerList(id)", controller_source)
+    self.assertIn("requestPlayerList(next.id)", controller_source)
+    self.assertIn("root.mediaSelectPlayer(targetDeviceId, activePlayer)", controller_source)
     self.assertIn("function mediaPlayPause(id)", controller_source)
     self.assertNotIn("function mediaPlay(id)", controller_source)
     self.assertNotIn("function mediaPause(id)", controller_source)

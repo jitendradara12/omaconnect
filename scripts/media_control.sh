@@ -60,7 +60,7 @@ if raw_all and ("'isPlaying':" in raw_all or "'title':" in raw_all or "'player':
         return s.replace(r"\'", "'").replace(r'\"', '"').replace(r"\\", "\\")
 
     def extract_str(key):
-        m = re.search(r"'" + key + r"':\s*<(?:@s\s+)?(['\"])((?:\\.|(?!\1).)*)\1>", raw_all)
+        m = re.search(r"'" + key + r"':\s*<(?:@s\s+)?(['\"])((?:\\.|(?!\1).)*)\1>", raw_all, re.DOTALL)
         return unescape(m.group(2)) if m else ""
 
     title = extract_str("title") or extract_str("nowPlaying")
@@ -69,9 +69,9 @@ if raw_all and ("'isPlaying':" in raw_all or "'title':" in raw_all or "'player':
     player = extract_str("player")
     album_art = extract_str("localAlbumArtUrl") or extract_str("albumArtUrl") or extract_str("artUrl") or extract_str("albumArt")
     player_list = []
-    m_pl = re.search(r"'playerList':\s*<.*?\[(.*?)\]>", raw_all)
+    m_pl = re.search(r"'playerList':\s*<.*?\[(.*?)\]>", raw_all, re.DOTALL)
     if m_pl:
-        raw_items = re.findall(r"(['\"])((?:\\.|(?!\1).)*)\1", m_pl.group(1))
+        raw_items = re.findall(r"(['\"])((?:\\.|(?!\1).)*)\1", m_pl.group(1), re.DOTALL)
         player_list = [unescape(item[1]) for item in raw_items]
 else:
     def get_prop(name):
@@ -97,8 +97,20 @@ else:
     player_list_raw = get_prop("playerList")
     player_list = []
     if player_list_raw:
-        matches = re.findall(r"'([^']*)'", player_list_raw)
-        player_list = matches if matches else re.findall(r'"([^"]*)"', player_list_raw)
+        matches = re.findall(r"'([^']*)'", player_list_raw, re.DOTALL)
+        player_list = matches if matches else re.findall(r'"([^"]*)"', player_list_raw, re.DOTALL)
+
+if not player and player_list:
+    player = player_list[0]
+    try:
+        escaped_player = player.replace("\\", "\\\\").replace("'", r"\'")
+        subprocess.run([
+            "gdbus", "call", "--session", "--dest", "org.kde.kdeconnect",
+            "--object-path", base, "--method", "org.freedesktop.DBus.Properties.Set",
+            "org.kde.kdeconnect.device.mprisremote", "player", f"<'{escaped_player}'>"
+        ], capture_output=True, text=True, timeout=1)
+    except Exception:
+        pass
 
 if player and player not in player_list:
     player_list.insert(0, player)
