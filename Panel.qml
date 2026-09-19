@@ -7,18 +7,16 @@ import qs.Commons
 import qs.Ui
 import "./components"
 
-KeyboardPanel {
+Panel {
     id: root
+    moduleName: "omaconnect"
+    ipcTarget: "omaconnect"
+    manageIpc: false
 
+    property var anchorItem: hostWidget && hostWidget.button ? hostWidget.button : null
     property var hostWidget: null
-    anchorItem: hostWidget && hostWidget.button ? hostWidget.button : null
-    bar: hostWidget ? hostWidget.bar : null
-    property var settings: hostWidget ? hostWidget.settings : null
     readonly property var barIdentity: hostWidget || root
-    owner: barIdentity
-    property bool opened: false
-    open: opened
-    property Item focusTarget: keyCatcher
+    readonly property Item focusTarget: keyCatcher
 
     readonly property var service: hostWidget && hostWidget.service ? hostWidget.service : (bar && bar.shell && typeof bar.shell.serviceFor === "function" ? bar.shell.serviceFor("omaconnect") : null)
     readonly property var device: service ? service.selectedDevice : null
@@ -56,7 +54,7 @@ KeyboardPanel {
     function open() {
         if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
         unpairConfirmingId = ""
-        opened = true
+        root.controller.show()
         if (service && device && device.paired && device.reachable && device.capabilities && device.capabilities.media) {
             service.fetchMediaStatus(device.id)
             if (typeof service.requestPlayerList === "function") service.requestPlayerList(device.id)
@@ -65,10 +63,16 @@ KeyboardPanel {
     function close() {
         if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
         unpairConfirmingId = ""
-        opened = false
+        root.controller.hide()
     }
-    function toggle() { opened ? close() : open() }
-    function closeForPopoutSwitch() { opened = false }
+    function toggle() { root.opened ? close() : open() }
+    function closeForPopoutSwitch() {
+        if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
+        unpairConfirmingId = ""
+        root.popoutSwitchClosing = true
+        root.close()
+        Qt.callLater(function() { root.popoutSwitchClosing = false })
+    }
 
     function getSetting(key, defaultValue) {
         if (!settings || typeof settings !== "object") return defaultValue
@@ -439,12 +443,19 @@ KeyboardPanel {
         }
     }
 
-    contentWidth: root.fittedContentWidth(Style.space(380))
-    contentHeight: root.fittedContentHeight(scrollView.implicitHeight)
+    KeyboardPanel {
+        id: panel
+        anchorItem: root.anchorItem
+        owner: root.barIdentity
+        bar: root.bar
+        open: root.opened
+        focusTarget: keyCatcher
+        contentWidth: panel.fittedContentWidth(Style.space(380))
+        contentHeight: panel.fittedContentHeight(scrollView.implicitHeight)
 
-    PanelKeyCatcher {
-        id: keyCatcher
-        anchors.fill: parent
+        PanelKeyCatcher {
+            id: keyCatcher
+            anchors.fill: parent
 
         blocked: root.activeComposer !== "none" || !!(composerSection && ((composerSection.pingInput && composerSection.pingInput.activeFocus) || (composerSection.textInput && composerSection.textInput.activeFocus))) || !!(networkSection && networkSection.addressInput && networkSection.addressInput.activeFocus)
         onMoveRequested: function(dx, dy) {
@@ -590,4 +601,5 @@ KeyboardPanel {
             }
         }
     }
+}
 }

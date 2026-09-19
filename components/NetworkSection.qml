@@ -78,9 +78,9 @@ Column {
                     text: {
                         if (!root.service) return ""
                         if (root.service.tailscaleLoading) return "Checking…"
-                        return root.service.tailscaleStatus
+                        return root.service.tailscaleStatus || ""
                     }
-                    color: root.service && root.service.tailscaleRunning ? Color.accent : Qt.darker(root.foreground, 1.4)
+                    color: (root.service && root.service.tailscaleRunning) ? Color.accent : Qt.darker(root.foreground, 1.4)
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
                     anchors.verticalCenter: parent.verticalCenter
@@ -95,7 +95,7 @@ Column {
             tooltipText: "Refresh Tailscale peers"
             foreground: root.foreground
             fontFamily: root.fontFamily
-            enabled: !!root.service && !root.service.tailscaleLoading
+            enabled: !!(root.service && !root.service.tailscaleLoading)
             onClicked: if (root.service) root.service.refreshTailscale()
         }
     }
@@ -229,11 +229,11 @@ Column {
 
                         Button {
                             id: peerButton
-                            text: (root.service && modelData && root.service.customAddresses.indexOf(modelData.address) !== -1) ? "Saved" : "Add"
+                            text: (root.service && modelData && root.service.customAddresses && root.service.customAddresses.indexOf(modelData.address) !== -1) ? "Saved" : "Add"
                             foreground: root.foreground
                             fontFamily: root.fontFamily
                             fontSize: Style.font.bodySmall
-                            enabled: !!root.service && root.service.customAddressesReady && !root.service.addressBusy && text !== "Saved"
+                            enabled: !!(root.service && root.service.customAddressesReady && !root.service.addressBusy && peerButton.text !== "Saved")
                             onClicked: if (root.service && modelData) root.service.addCustomAddress(modelData.address)
                         }
                     }
@@ -242,7 +242,7 @@ Column {
         }
 
         Column {
-            visible: !!(root.service && root.service.customAddresses.length > 0)
+            visible: !!(root.service && root.service.customAddresses && root.service.customAddresses.length > 0)
             width: parent.width
             spacing: Style.space(4)
 
@@ -299,7 +299,7 @@ Column {
                             foreground: root.foreground
                             fontFamily: root.fontFamily
                             fontSize: Style.font.bodySmall
-                            enabled: !!root.service && root.service.customAddressesReady && !root.service.addressBusy
+                            enabled: !!(root.service && root.service.customAddressesReady && !root.service.addressBusy)
                             onClicked: if (root.service) root.service.removeCustomAddress(modelData)
                         }
                     }

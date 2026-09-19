@@ -211,7 +211,7 @@ Column {
 
             Text {
                 width: parent.width
-                text: panel.incomingRequest ? "Pairing request from " + panel.incomingRequest.name : "Pairing request"
+                text: (panel.incomingRequest && panel.incomingRequest.name) ? "Pairing request from " + panel.incomingRequest.name : "Pairing request"
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
@@ -222,7 +222,7 @@ Column {
             Text {
                 visible: !!(panel.incomingRequest && panel.incomingRequest.verificationKey)
                 width: parent.width
-                text: "Verify on both devices: " + (panel.incomingRequest ? (root.service ? root.service.formatVerificationKey(panel.incomingRequest.verificationKey) : panel.incomingRequest.verificationKey) : "")
+                text: "Verify on both devices: " + ((panel.incomingRequest && panel.incomingRequest.verificationKey) ? (root.service ? root.service.formatVerificationKey(panel.incomingRequest.verificationKey) : panel.incomingRequest.verificationKey) : "")
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -235,14 +235,14 @@ Column {
                     selected: true
                     foreground: root.foreground
                     fontFamily: root.fontFamily
-                    enabled: !!(root.service && panel.incomingRequest && !root.service.pendingPairing[panel.incomingRequest.id])
+                    enabled: !!(root.service && panel.incomingRequest && (!root.service.pendingPairing || !root.service.pendingPairing[panel.incomingRequest.id]))
                     onClicked: if (root.service && panel.incomingRequest) root.service.acceptPairing(panel.incomingRequest.id)
                 }
                 Button {
                     text: "Reject"
                     foreground: root.foreground
                     fontFamily: root.fontFamily
-                    enabled: !!(root.service && panel.incomingRequest && !root.service.pendingPairing[panel.incomingRequest.id])
+                    enabled: !!(root.service && panel.incomingRequest && (!root.service.pendingPairing || !root.service.pendingPairing[panel.incomingRequest.id]))
                     onClicked: if (root.service && panel.incomingRequest) root.service.rejectPairing(panel.incomingRequest.id)
                 }
             }
@@ -271,7 +271,7 @@ Column {
 
             width: deviceList.width
             implicitHeight: row.implicitHeight + Style.space(8)
-            hasCursor: panel.cursorActive && panel.focusSection === "devices" && panel.selectedIndex === index
+            hasCursor: !!(modelData && panel.cursorActive && panel.focusSection === "devices" && panel.selectedIndex === index)
             current: isCurrent
             foreground: root.foreground
             fill: Style.hoverFillFor(root.foreground, Color.accent)
@@ -316,7 +316,7 @@ Column {
 
                         Text {
                             id: nameText
-                            text: modelData ? modelData.name : ""
+                            text: (modelData && modelData.name) ? modelData.name : ""
                             color: root.foreground
                             font.family: root.fontFamily
                             font.pixelSize: Style.font.body
@@ -326,7 +326,7 @@ Column {
                         }
 
                         Text {
-                            visible: !modelData || !modelData.paired || !modelData.reachable
+                            visible: !!modelData && (!modelData.paired || !modelData.reachable)
                             text: (!modelData || !modelData.paired) ? "Unpaired" : "Offline"
                             color: Qt.darker(root.foreground, 1.5)
                             font.family: root.fontFamily
@@ -344,7 +344,7 @@ Column {
                     spacing: Style.space(4)
 
                     Row {
-                        visible: isUnpairConfirming
+                        visible: !!modelData && isUnpairConfirming
                         spacing: Style.space(4)
                         Button {
                             text: "Confirm"
@@ -364,7 +364,7 @@ Column {
                     }
 
                     Button {
-                        visible: !isUnpairConfirming && devicePendingState === "requesting"
+                        visible: !!modelData && !isUnpairConfirming && devicePendingState === "requesting"
                         text: "Pairing..."
                         tooltipText: "Click to cancel request"
                         foreground: root.foreground
@@ -378,7 +378,7 @@ Column {
                         }
                     }
                     Button {
-                        visible: !isUnpairConfirming && devicePendingState === "removing"
+                        visible: !!modelData && !isUnpairConfirming && devicePendingState === "removing"
                         enabled: false
                         text: "Unpairing..."
                         foreground: root.foreground

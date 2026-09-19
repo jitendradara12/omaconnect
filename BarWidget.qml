@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -77,6 +78,17 @@ BarWidget {
         onPressed: function(b) {
             root.togglePanel()
         }
+    }
+
+    IpcHandler {
+        target: "omaconnect"
+
+        function open(): void { root.open() }
+        function close(): void { root.close() }
+        function show(): void { root.open() }
+        function hide(): void { root.close() }
+        function toggle(): void { root.togglePanel() }
+        function refresh(): void { if (root.service) root.service.refresh(true) }
     }
 
     Loader {

@@ -72,7 +72,7 @@ Column {
             tooltipText: "Refresh commands"
             foreground: root.foreground
             fontFamily: root.fontFamily
-            enabled: !root.service || !root.service.commandsLoading
+            enabled: !!(root.service && !root.service.commandsLoading)
             onClicked: if (root.service && root.device) root.service.fetchRemoteCommands(root.device.id)
         }
     }
@@ -89,7 +89,7 @@ Column {
             font.pixelSize: Style.font.bodySmall
         }
         Text {
-            visible: !!root.service && !root.service.commandsLoading && root.service.remoteCommands.length === 0
+            visible: !!root.service && !root.service.commandsLoading && (!root.service.remoteCommands || root.service.remoteCommands.length === 0)
             text: "No remote commands configured"
             color: Qt.darker(root.foreground, 1.4)
             font.family: root.fontFamily
