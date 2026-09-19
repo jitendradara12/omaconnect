@@ -5,7 +5,7 @@ operation=${1:-}
 device_id=${2:-}
 argument=${3:-}
 
-[[ "$operation" =~ ^(status|action|player)$ ]] || exit 64
+[[ "$operation" =~ ^(status|action|player|request_players)$ ]] || exit 64
 [[ -n "$device_id" && "$device_id" != *$'\t'* && "$device_id" != *$'\n'* && "$device_id" != *' '* && "$device_id" != */* ]] || exit 64
 
 for cmd in gdbus; do
@@ -23,14 +23,14 @@ import sys, json, subprocess, re
 device_id = sys.argv[1]
 base = f"/modules/kdeconnect/devices/{device_id}/mprisremote"
 
-def get_prop(name):
+def query_all_props():
     try:
         res = subprocess.run([
             "gdbus", "call", "--session", "--dest", "org.kde.kdeconnect",
-            "--object-path", base, "--method", "org.freedesktop.DBus.Properties.Get",
-            "org.kde.kdeconnect.device.mprisremote", name
+            "--object-path", base, "--method", "org.freedesktop.DBus.Properties.GetAll",
+            "org.kde.kdeconnect.device.mprisremote"
         ], capture_output=True, text=True, timeout=2)
-        if res.returncode == 0:
+        if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
     except Exception:
         pass
@@ -40,7 +40,6 @@ def clean_val(raw):
     raw = raw.strip()
     if not raw:
         return ""
-    # Strip enclosing (<...>,) or (<...>)
     m = re.search(r"\(<(.+)>\s*,\s*\)", raw, re.DOTALL)
     if m:
         val = m.group(1).strip()
@@ -51,50 +50,55 @@ def clean_val(raw):
         val = val[1:-1]
     elif val.startswith('"') and val.endswith('"'):
         val = val[1:-1]
-    return val
+    return val.replace(r"\'", "'").replace(r'\"', '"').replace(r"\\", "\\")
 
-is_playing_raw = get_prop("isPlaying")
-is_playing = "<true>" in is_playing_raw or "(true," in is_playing_raw
+raw_all = query_all_props()
 
-title = clean_val(get_prop("title"))
-if not title:
-    title = clean_val(get_prop("nowPlaying"))
+if raw_all and ("'isPlaying':" in raw_all or "'title':" in raw_all or "'player':" in raw_all):
+    is_playing = bool(re.search(r"'isPlaying':\s*<(true|@b\s+true)>", raw_all, re.I))
+    def unescape(s):
+        return s.replace(r"\'", "'").replace(r'\"', '"').replace(r"\\", "\\")
 
-artist = clean_val(get_prop("artist"))
-album = clean_val(get_prop("album"))
-player = clean_val(get_prop("player"))
+    def extract_str(key):
+        m = re.search(r"'" + key + r"':\s*<(?:@s\s+)?(['\"])((?:\\.|(?!\1).)*)\1>", raw_all)
+        return unescape(m.group(2)) if m else ""
 
-# KDE Connect exposes downloaded artwork as a local file URL.
-album_art = clean_val(get_prop("localAlbumArtUrl"))
-if not album_art:
-    album_art = clean_val(get_prop("albumArtUrl"))
-if not album_art:
-    album_art = clean_val(get_prop("artUrl"))
-if not album_art:
-    album_art = clean_val(get_prop("albumArt"))
+    title = extract_str("title") or extract_str("nowPlaying")
+    artist = extract_str("artist")
+    album = extract_str("album")
+    player = extract_str("player")
+    album_art = extract_str("localAlbumArtUrl") or extract_str("albumArtUrl") or extract_str("artUrl") or extract_str("albumArt")
+    player_list = []
+    m_pl = re.search(r"'playerList':\s*<.*?\[(.*?)\]>", raw_all)
+    if m_pl:
+        raw_items = re.findall(r"(['\"])((?:\\.|(?!\1).)*)\1", m_pl.group(1))
+        player_list = [unescape(item[1]) for item in raw_items]
+else:
+    def get_prop(name):
+        try:
+            res = subprocess.run([
+                "gdbus", "call", "--session", "--dest", "org.kde.kdeconnect",
+                "--object-path", base, "--method", "org.freedesktop.DBus.Properties.Get",
+                "org.kde.kdeconnect.device.mprisremote", name
+            ], capture_output=True, text=True, timeout=2)
+            if res.returncode == 0:
+                return res.stdout.strip()
+        except Exception:
+            pass
+        return ""
 
-# Check player list
-player_list_raw = get_prop("playerList")
-player_list = []
-if player_list_raw:
-    # Match strings in array e.g. ['YT Music', 'Spotify']
-    matches = re.findall(r"'([^']*)'", player_list_raw)
-    if matches:
-        player_list = matches
-    else:
-        # Fallback double quotes
-        matches = re.findall(r'"([^"]*)"', player_list_raw)
-        if matches:
-            player_list = matches
-
-if not player_list:
-    try:
-        subprocess.run([
-            "gdbus", "call", "--session", "--dest", "org.kde.kdeconnect",
-            "--object-path", base, "--method", "org.kde.kdeconnect.device.mprisremote.requestPlayerList"
-        ], capture_output=True, text=True, timeout=1)
-    except Exception:
-        pass
+    is_playing_raw = get_prop("isPlaying")
+    is_playing = "<true>" in is_playing_raw or "(true," in is_playing_raw
+    title = clean_val(get_prop("title")) or clean_val(get_prop("nowPlaying"))
+    artist = clean_val(get_prop("artist"))
+    album = clean_val(get_prop("album"))
+    player = clean_val(get_prop("player"))
+    album_art = clean_val(get_prop("localAlbumArtUrl")) or clean_val(get_prop("albumArtUrl")) or clean_val(get_prop("artUrl")) or clean_val(get_prop("albumArt"))
+    player_list_raw = get_prop("playerList")
+    player_list = []
+    if player_list_raw:
+        matches = re.findall(r"'([^']*)'", player_list_raw)
+        player_list = matches if matches else re.findall(r'"([^"]*)"', player_list_raw)
 
 if player and player not in player_list:
     player_list.insert(0, player)
@@ -110,6 +114,11 @@ out = {
 }
 print(json.dumps(out))
 PYEOF
+        ;;
+    request_players)
+        gdbus call --session --dest org.kde.kdeconnect \
+            --object-path "$base" \
+            --method org.kde.kdeconnect.device.mprisremote.requestPlayerList >/dev/null 2>&1 || true
         ;;
     action)
         action_name="$argument"

@@ -48,6 +48,7 @@ KeyboardPanel {
         mediaControlIndex = 1
         if (mediaExpanded && service && device && device.capabilities && device.capabilities.media) {
             service.fetchMediaStatus(device.id)
+            if (typeof service.requestPlayerList === "function") service.requestPlayerList(device.id)
         }
     }
 
@@ -57,6 +58,7 @@ KeyboardPanel {
         opened = true
         if (service && device && device.paired && device.reachable && device.capabilities && device.capabilities.media) {
             service.fetchMediaStatus(device.id)
+            if (typeof service.requestPlayerList === "function") service.requestPlayerList(device.id)
         }
     }
     function close() {

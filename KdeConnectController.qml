@@ -920,7 +920,20 @@ Item {
     }
 
     function mediaPlayPause(id) {
-        return sendMediaAction(id, "PlayPause")
+        var devId = id || selectedDeviceId
+        var prevPlaying = mediaState ? mediaState.isPlaying : false
+        if (devId === selectedDeviceId && mediaState) {
+            var updated = Object.assign({}, mediaState)
+            updated.isPlaying = !prevPlaying
+            mediaState = updated
+        }
+        var sent = sendMediaAction(devId, "PlayPause")
+        if (!sent && devId === selectedDeviceId && mediaState) {
+            var reverted = Object.assign({}, mediaState)
+            reverted.isPlaying = prevPlaying
+            mediaState = reverted
+        }
+        return sent
     }
 
     function mediaNext(id) {
@@ -929,6 +942,17 @@ Item {
 
     function mediaPrevious(id) {
         return sendMediaAction(id, "Previous")
+    }
+
+    function requestPlayerList(id) {
+        var devId = id || selectedDeviceId
+        var device = deviceById(devId)
+        if (!device || !canAct(devId) || !device.capabilities || !device.capabilities.media) return false
+        if (mediaPlayerProcess.running) return false
+        mediaPlayerProcess.targetDeviceId = String(devId)
+        mediaPlayerProcess.command = ["bash", getMediaScriptPath(), "request_players", String(devId)]
+        mediaPlayerProcess.running = true
+        return true
     }
 
     function mediaSelectPlayer(id, playerName) {
@@ -943,8 +967,12 @@ Item {
     }
 
     function handleMediaProcessExit(code, targetDeviceId) {
-        if (code === 0 && targetDeviceId === root.selectedDeviceId) {
-            root.fetchMediaStatus(targetDeviceId)
+        if (targetDeviceId === root.selectedDeviceId) {
+            if (code !== 0) {
+                root.fetchMediaStatus(targetDeviceId)
+            } else {
+                mediaDebounceTimer.restart()
+            }
         }
     }
 
@@ -1250,7 +1278,7 @@ Item {
                 try {
                     var parsed = JSON.parse(stdout.text.trim())
                     root.mediaState = {
-                        isPlaying: parsed.isPlaying === true,
+                        isPlaying: (root.mediaActionProcess.running && root.mediaState) ? root.mediaState.isPlaying : (parsed.isPlaying === true),
                         title: String(parsed.title || ""),
                         artist: String(parsed.artist || ""),
                         album: String(parsed.album || ""),
@@ -1265,12 +1293,12 @@ Item {
                 root.mediaState = root.emptyMediaState()
             }
 
-            if (targetDeviceId !== root.selectedDeviceId) return
             root.mediaLoading = false
             if (root.mediaRefreshPending && root.selectedDeviceId) {
                 root.mediaRefreshPending = false
                 Qt.callLater(function() { root.fetchMediaStatus(root.selectedDeviceId) })
             }
+            if (targetDeviceId !== root.selectedDeviceId) return
         }
     }
 

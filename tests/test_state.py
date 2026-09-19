@@ -1734,6 +1734,7 @@ class StateTests(unittest.TestCase):
       gdbus.write_text("\n".join([
           "#!/usr/bin/env bash",
           'case "$*" in',
+          "  *GetAll*) printf \"({'album': <''>, 'artist': <''>, 'isPlaying': <true>, 'localAlbumArtUrl': <'file:///tmp/cover.jpg'>, 'player': <'Music'>, 'playerList': <['Music']>, 'title': <'Track'>},)\\n\" ;;",
           "  *localAlbumArtUrl*) printf \"(<'file:///tmp/cover.jpg'>,)\\n\" ;;",
           "  *playerList*) printf \"(<['Music']>,)\\n\" ;;",
           "  *isPlaying*) printf \"(<true>,)\\n\" ;;",
@@ -1755,9 +1756,72 @@ class StateTests(unittest.TestCase):
     self.assertEqual(result.returncode, 0, result.stderr)
     self.assertEqual(json.loads(result.stdout)["albumArt"], "file:///tmp/cover.jpg")
 
+    # Verify GetAll consolidation and absence of blocking 1s requestPlayerList in media_control.sh
+    media_script_content = script_path.read_text()
+    self.assertIn("Properties.GetAll", media_script_content)
+    self.assertIn("request_players", media_script_content)
+    self.assertNotIn("requestPlayerList\"], capture_output=True, text=True, timeout=1", media_script_content)
+
+  def test_media_player_parses_apostrophes_and_supports_fallback(self):
+    script_path = ROOT / "scripts" / "media_control.sh"
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text(r"""#!/usr/bin/env bash
+case "$*" in
+  *GetAll*) cat << 'EOF'
+({'album': <'Greatest Hits'>, 'artist': <'Guns N\' Roses'>, 'isPlaying': <true>, 'localAlbumArtUrl': <''>, 'player': <'Spotify'>, 'playerList': <['Spotify', 'Don\'t Stop']>, 'title': <'Don\'t Cry'>},)
+EOF
+  ;;
+  *) printf "(<' '>,)\n" ;;
+esac
+""")
+      _ = gdbus.chmod(0o755)
+      result = subprocess.run(
+          ["bash", str(script_path), "status", "dev-1"],
+          capture_output=True,
+          text=True,
+          check=False,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(result.returncode, 0, result.stderr)
+      data = json.loads(result.stdout)
+      self.assertEqual(data["artist"], "Guns N' Roses")
+      self.assertEqual(data["title"], "Don't Cry")
+      self.assertIn("Don't Stop", data["playerList"])
+
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text(r"""#!/usr/bin/env bash
+case "$*" in
+  *GetAll*) exit 1 ;;
+  *isPlaying*) printf "(<true>,)\n" ;;
+  *title*) cat << 'EOF'
+(<'Sweet Child O\' Mine'>,)
+EOF
+  ;;
+  *playerList*) printf "(<['Spotify']>,)\n" ;;
+  *) printf "(<''>,)\n" ;;
+esac
+""")
+      _ = gdbus.chmod(0o755)
+      result = subprocess.run(
+          ["bash", str(script_path), "status", "dev-1"],
+          capture_output=True,
+          text=True,
+          check=False,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(result.returncode, 0, result.stderr)
+      data = json.loads(result.stdout)
+      self.assertTrue(data["isPlaying"])
+      self.assertEqual(data["title"], "Sweet Child O' Mine")
+
   def test_media_player_qml_contracts_and_components(self):
     controller_source = (ROOT / "KdeConnectController.qml").read_text()
     self.assertIn("function fetchMediaStatus(id)", controller_source)
+    self.assertIn("function requestPlayerList(id)", controller_source)
     self.assertIn("function mediaPlayPause(id)", controller_source)
     self.assertNotIn("function mediaPlay(id)", controller_source)
     self.assertNotIn("function mediaPause(id)", controller_source)
@@ -1765,6 +1829,7 @@ class StateTests(unittest.TestCase):
     self.assertIn("function mediaPrevious(id)", controller_source)
     self.assertIn("function mediaSelectPlayer(id, playerName)", controller_source)
     self.assertIn("function handleMediaProcessExit(code, targetDeviceId)", controller_source)
+    self.assertIn("isPlaying = !prevPlaying", controller_source)
     self.assertIn("property var mediaState:", controller_source)
     self.assertIn("property bool mediaLoading:", controller_source)
     self.assertIn("id: mediaStatusProcess", controller_source)
@@ -1775,6 +1840,7 @@ class StateTests(unittest.TestCase):
     self.assertIn("property alias mediaState: controller.mediaState", service_source)
     self.assertIn("property alias mediaLoading: controller.mediaLoading", service_source)
     self.assertIn("function fetchMediaStatus(id)", service_source)
+    self.assertIn("function requestPlayerList(id)", service_source)
     self.assertIn("function mediaPlayPause(id)", service_source)
     self.assertNotIn("function mediaPlay(id)", service_source)
     self.assertNotIn("function mediaPause(id)", service_source)

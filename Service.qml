@@ -75,6 +75,7 @@ Item {
     function deviceBatteryIcon(device) { return controller.deviceBatteryIcon(device) }
     function deviceNetworkIcon(device) { return controller.deviceNetworkIcon(device) }
     function fetchMediaStatus(id) { return controller.fetchMediaStatus(id) }
+    function requestPlayerList(id) { return controller.requestPlayerList(id) }
     function mediaPlayPause(id) { return controller.mediaPlayPause(id) }
     function mediaNext(id) { return controller.mediaNext(id) }
     function mediaPrevious(id) { return controller.mediaPrevious(id) }
