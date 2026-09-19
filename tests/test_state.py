@@ -1110,6 +1110,71 @@ class StateTests(unittest.TestCase):
     self.assertLess(len(result.stdout.encode()), 128 * 1024)
     self.assertTrue(options[0].endswith("-0399.pdf"))
 
+  def test_file_picker_supports_expanded_formats_and_desktop(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      home = Path(tmp)
+      desktop = home / "Desktop"
+      desktop.mkdir()
+      downloads = home / "Downloads"
+      downloads.mkdir()
+
+      desktop_file = desktop / "presentation.pptx"
+      desktop_file.write_text("dummy")
+
+      (downloads / "song.mp3").write_text("dummy")
+      (downloads / "lossless.flac").write_text("dummy")
+      (downloads / "voice.m4a").write_text("dummy")
+      (downloads / "audio.opus").write_text("dummy")
+
+      (downloads / "document.docx").write_text("dummy")
+      (downloads / "data.xlsx").write_text("dummy")
+      (downloads / "table.csv").write_text("dummy")
+      (downloads / "notes.md").write_text("dummy")
+      (downloads / "book.epub").write_text("dummy")
+
+      (downloads / "archive.7z").write_text("dummy")
+      (downloads / "compressed.zst").write_text("dummy")
+      (downloads / "app.apk").write_text("dummy")
+
+      stub_dir = home / ".local" / "bin"
+      stub_dir.mkdir(parents=True)
+      stub = stub_dir / "omarchy-menu-select"
+      stub.write_text("#!/usr/bin/env bash\ncat\n")
+      stub.chmod(0o755)
+
+      result = subprocess.run(
+          ["bash", str(ROOT / "scripts" / "pick_file.sh")],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "HOME": str(home), "OMARCHY_PATH": ""},
+      )
+
+      self.assertEqual(result.returncode, 0)
+      options = result.stdout.splitlines()
+      basenames = {Path(line).name for line in options}
+
+      expected = {
+          "presentation.pptx", "song.mp3", "lossless.flac", "voice.m4a",
+          "audio.opus", "document.docx", "data.xlsx", "table.csv",
+          "notes.md", "book.epub", "archive.7z", "compressed.zst", "app.apk"
+      }
+      for filename in expected:
+        self.assertIn(filename, basenames)
+
+      deep_dir = downloads / "a" / "b" / "c" / "d" / "e"
+      deep_dir.mkdir(parents=True)
+      (deep_dir / "hidden_too_deep.mp3").write_text("dummy")
+
+      result2 = subprocess.run(
+          ["bash", str(ROOT / "scripts" / "pick_file.sh")],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "HOME": str(home), "OMARCHY_PATH": ""},
+      )
+      options2 = result2.stdout.splitlines()
+      basenames2 = {Path(line).name for line in options2}
+      self.assertNotIn("hidden_too_deep.mp3", basenames2)
+
   def test_remote_commands_unsupported_device(self):
     line = "DEVICE\tdev-unsupp\tPhone\tphone\ttrue\ttrue\t80\tfalse\tkdeconnect_ping,kdeconnect_share"
     dev = parse_device(line)

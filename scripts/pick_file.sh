@@ -7,8 +7,8 @@ else
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-roots=("$HOME/Downloads" "$HOME/Documents" "$HOME/Pictures" "$HOME/Videos")
-formats=(jpg jpeg png webp gif heic avif mp4 mov m4v mkv webm avi pdf txt zip tar gz iso)
+roots=("$HOME/Downloads" "$HOME/Documents" "$HOME/Pictures" "$HOME/Videos" "$HOME/Desktop")
+formats=(jpg jpeg png webp gif heic avif svg mp4 mov m4v mkv webm avi mp3 flac wav m4a ogg opus pdf txt docx xlsx pptx odt ods csv json md epub zip tar gz bz2 xz 7z zst apk iso)
 
 # omarchy-menu-select serialises the option list into a single argv entry for
 # perl, so the picker dies with E2BIG once that entry exceeds Linux's
@@ -24,7 +24,7 @@ for root in "${roots[@]}"; do
 done
 (( ${#search_roots[@]} )) || exit 1
 
-find_args=("${search_roots[@]}" "(" -type d -name ".*" ! -name "." -prune ")" -o -type f ! -name ".*" "(")
+find_args=("${search_roots[@]}" -maxdepth 4 "(" -type d -name ".*" ! -name "." -prune ")" -o -type f ! -name ".*" "(")
 for index in "${!formats[@]}"; do
     (( index )) && find_args+=(-o)
     find_args+=(-iname "*.${formats[index]}")
