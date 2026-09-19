@@ -1896,6 +1896,50 @@ class StateTests(unittest.TestCase):
     self.assertIn("!root.service.fileBusy", device_section_source)
 
 
+  def test_dbus_signal_filtering_and_monitoring(self):
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    # Fine-grained match rules
+    self.assertIn("org.kde.kdeconnect.daemon", controller_source)
+    self.assertIn("org.kde.kdeconnect.device.battery", controller_source)
+    self.assertIn("org.kde.kdeconnect.device.connectivity_report", controller_source)
+    self.assertIn("org.kde.kdeconnect.device.mprisremote", controller_source)
+    # Debounce timers tuned
+    self.assertIn("id: dbusDebounceTimer; interval: 500", controller_source)
+    self.assertIn("id: mediaDebounceTimer; interval: 500", controller_source)
+
+    # Test parser discrimination
+    def simulate_parse(line):
+        val = line.strip()
+        if not val:
+            return None
+        is_signal = val.startswith("sig\t") or val.startswith("signal ")
+        if not is_signal:
+            return None
+        if "/mprisremote" in val or "org.kde.kdeconnect.device.mprisremote" in val:
+            return "media"
+        if any(token in val for token in [
+            "/battery", "/connectivity_report", "org.kde.kdeconnect.device.battery",
+            "org.kde.kdeconnect.device.connectivity_report", "org.kde.kdeconnect.device",
+            "org.kde.kdeconnect.daemon", "deviceAdded", "deviceRemoved", "deviceVisibilityChanged",
+            "reachableChanged", "pairStateChanged", "chargeChanged"
+        ]):
+            return "dbus"
+        return None
+
+    # Media signals trigger media and NOT dbus
+    self.assertEqual(simulate_parse("sig\t1.0\t1\torg.kde.kdeconnect\t:1\t/modules/kdeconnect/devices/dev1/mprisremote\torg.freedesktop.DBus.Properties\tPropertiesChanged"), "media")
+    self.assertEqual(simulate_parse("signal time=1.0 sender=:1 path=/modules/kdeconnect/devices/dev1/mprisremote; interface=org.kde.kdeconnect.device.mprisremote; member=propertiesChanged"), "media")
+
+    # Battery and device signals trigger dbus and NOT media
+    self.assertEqual(simulate_parse("sig\t1.0\t1\torg.kde.kdeconnect\t:1\t/modules/kdeconnect/devices/dev1/battery\torg.freedesktop.DBus.Properties\tPropertiesChanged"), "dbus")
+    self.assertEqual(simulate_parse("signal time=1.0 sender=:1 path=/modules/kdeconnect/devices/dev1; interface=org.kde.kdeconnect.device; member=reachableChanged"), "dbus")
+    self.assertEqual(simulate_parse("signal time=1.0 sender=:1 path=/modules/kdeconnect; interface=org.kde.kdeconnect.daemon; member=deviceAdded"), "dbus")
+
+    # Payload / non-signal lines with overlapping keywords are ignored
+    self.assertIsNone(simulate_parse("   string \"device playback track\""))
+    self.assertIsNone(simulate_parse("   string \"mpris metadata\""))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

@@ -1053,8 +1053,8 @@ Item {
         }
     }
 
-    Timer { id: dbusDebounceTimer; interval: 300; repeat: false; onTriggered: root.refresh() }
-    Timer { id: mediaDebounceTimer; interval: 300; repeat: false; onTriggered: if (root.selectedDeviceId) root.fetchMediaStatus(root.selectedDeviceId) }
+    Timer { id: dbusDebounceTimer; interval: 500; repeat: false; onTriggered: root.refresh() }
+    Timer { id: mediaDebounceTimer; interval: 500; repeat: false; onTriggered: if (root.selectedDeviceId) root.fetchMediaStatus(root.selectedDeviceId) }
 
     Timer {
         id: pairingWatchdogTimer
@@ -1085,17 +1085,44 @@ Item {
 
     Process {
         id: signalProcess
-        command: ["dbus-monitor", "--session", "type='signal',sender='org.kde.kdeconnect'"]
+        command: [
+            "dbus-monitor", "--profile", "--session",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.kde.kdeconnect.daemon'",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.kde.kdeconnect.device'",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.kde.kdeconnect.device.battery'",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.kde.kdeconnect.device.connectivity_report'",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.kde.kdeconnect.device.mprisremote'",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.freedesktop.DBus.Properties'"
+        ]
         onRunningChanged: {
             if (running) monitorStabilityTimer.restart()
             else monitorStabilityTimer.stop()
         }
         stdout: SplitParser { onRead: function(line) {
-            var value = String(line || "")
-            if (value.indexOf("device") !== -1 || value.indexOf("chargeChanged") !== -1 || value.indexOf("stateChanged") !== -1 || value.indexOf("refreshed") !== -1)
-                dbusDebounceTimer.restart()
-            if (value.indexOf("mpris") !== -1 || value.indexOf("PropertiesChanged") !== -1)
+            var value = String(line || "").trim()
+            if (!value) return
+            var isSignal = value.indexOf("sig\t") === 0 || value.indexOf("signal ") === 0
+            if (!isSignal) return
+
+            if (value.indexOf("/mprisremote") !== -1 || value.indexOf("org.kde.kdeconnect.device.mprisremote") !== -1) {
                 mediaDebounceTimer.restart()
+                return
+            }
+
+            if (value.indexOf("/battery") !== -1 ||
+                value.indexOf("/connectivity_report") !== -1 ||
+                value.indexOf("org.kde.kdeconnect.device.battery") !== -1 ||
+                value.indexOf("org.kde.kdeconnect.device.connectivity_report") !== -1 ||
+                value.indexOf("org.kde.kdeconnect.device") !== -1 ||
+                value.indexOf("org.kde.kdeconnect.daemon") !== -1 ||
+                value.indexOf("deviceAdded") !== -1 ||
+                value.indexOf("deviceRemoved") !== -1 ||
+                value.indexOf("deviceVisibilityChanged") !== -1 ||
+                value.indexOf("reachableChanged") !== -1 ||
+                value.indexOf("pairStateChanged") !== -1 ||
+                value.indexOf("chargeChanged") !== -1) {
+                dbusDebounceTimer.restart()
+            }
         } }
         onExited: {
             signalRestart.interval = Math.min(30000, 1000 * Math.pow(2, monitorRestartCount))
