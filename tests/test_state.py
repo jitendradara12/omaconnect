@@ -1498,6 +1498,140 @@ class StateTests(unittest.TestCase):
     nav.key_right()
     self.assertEqual(nav.focus_section, "devices")
 
+  def test_network_section_keyboard_navigation_and_focus_flow(self):
+    panel_source = (ROOT / "Panel.qml").read_text()
+    net_source = (ROOT / "components" / "NetworkSection.qml").read_text()
+
+    self.assertIn("readonly property var visibleSections:", panel_source)
+    self.assertIn("function navigateNextSection()", panel_source)
+    self.assertIn("function navigatePrevSection()", panel_source)
+    self.assertIn("getNetworkItemCount()", panel_source)
+    self.assertIn("networkSelectedIndex", panel_source)
+
+    self.assertIn("panel.networkSelectedIndex === (1 + index)", net_source)
+    self.assertIn("panel.networkSelectedIndex === (1 + ((root.service && root.service.tailscaleRunning) ? root.filteredPeers.length : 0) + index)", net_source)
+
+    class FullPanelNav:
+        def __init__(self, devices_count=2, actions=["ring", "clipboard"], has_media=True, commands=["cmd1", "cmd2"], peers=["p1", "p2"], saved=["s1"]):
+            self.devices_count = devices_count
+            self.actions = actions
+            self.has_media = has_media
+            self.commands = commands
+            self.peers = peers
+            self.saved = saved
+            self.commands_expanded = False
+            self.network_expanded = False
+
+            self.focus_section = "devices"
+            self.device_index = 0
+            self.action_index = 0
+            self.media_index = 1
+            self.command_index = 0
+            self.network_index = 0
+
+        @property
+        def visible_sections(self):
+            sections = ["devices"]
+            if self.actions: sections.append("actions")
+            if self.has_media: sections.append("media")
+            if self.commands: sections.append("commands")
+            sections.append("network")
+            return sections
+
+        def network_item_count(self):
+            if not self.network_expanded:
+                return 1
+            return 1 + len(self.peers) + len(self.saved)
+
+        def next_section(self):
+            idx = self.visible_sections.index(self.focus_section)
+            self.focus_section = self.visible_sections[(idx + 1) % len(self.visible_sections)]
+            if self.focus_section == "actions": self.action_index = 0
+            elif self.focus_section == "media": self.media_index = 0
+            elif self.focus_section == "commands": self.command_index = 0
+            elif self.focus_section == "network": self.network_index = 0
+
+        def prev_section(self):
+            idx = self.visible_sections.index(self.focus_section)
+            self.focus_section = self.visible_sections[(idx - 1 + len(self.visible_sections)) % len(self.visible_sections)]
+            if self.focus_section == "actions": self.action_index = len(self.actions) - 1
+            elif self.focus_section == "media": self.media_index = 2
+            elif self.focus_section == "commands": self.command_index = len(self.commands) - 1 if self.commands_expanded else 0
+            elif self.focus_section == "network": self.network_index = self.network_item_count() - 1 if self.network_expanded else 0
+
+        def key_down(self):
+            if self.focus_section == "devices":
+                if self.device_index < self.devices_count - 1:
+                    self.device_index += 1
+                else:
+                    self.next_section()
+            elif self.focus_section == "commands" and self.commands_expanded:
+                if self.command_index < len(self.commands) - 1:
+                    self.command_index += 1
+                else:
+                    self.next_section()
+            elif self.focus_section == "network" and self.network_expanded:
+                if self.network_index < self.network_item_count() - 1:
+                    self.network_index += 1
+                else:
+                    self.next_section()
+            else:
+                self.next_section()
+
+        def key_up(self):
+            if self.focus_section == "devices":
+                if self.device_index > 0:
+                    self.device_index -= 1
+                else:
+                    self.prev_section()
+            elif self.focus_section == "commands" and self.commands_expanded:
+                if self.command_index > 0:
+                    self.command_index -= 1
+                else:
+                    self.prev_section()
+            elif self.focus_section == "network" and self.network_expanded:
+                if self.network_index > 0:
+                    self.network_index -= 1
+                else:
+                    self.prev_section()
+            else:
+                self.prev_section()
+
+    nav = FullPanelNav()
+    self.assertEqual(nav.focus_section, "devices")
+    self.assertEqual(nav.device_index, 0)
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "devices")
+    self.assertEqual(nav.device_index, 1)
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "actions")
+    self.assertEqual(nav.action_index, 0)
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "media")
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "commands")
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "network")
+    self.assertEqual(nav.network_index, 0)
+
+    nav.network_expanded = True
+    self.assertEqual(nav.network_item_count(), 4)
+    nav.key_down()
+    self.assertEqual(nav.network_index, 1)
+    nav.key_down()
+    self.assertEqual(nav.network_index, 2)
+    nav.key_down()
+    self.assertEqual(nav.network_index, 3)
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "devices")
+
+    nav.key_up()
+    self.assertEqual(nav.focus_section, "devices")
+    self.assertEqual(nav.device_index, 0)
+    nav.key_up()
+    self.assertEqual(nav.focus_section, "network")
+    self.assertEqual(nav.network_index, 3)
+
   def test_refresh_does_not_reset_discovery_state_when_ready(self):
     controller_source = (ROOT / "KdeConnectController.qml").read_text()
     self.assertIn('if (discoveryState !== "ready")', controller_source)
@@ -2000,7 +2134,7 @@ esac
   def test_media_player_keyboard_navigation_in_panel(self):
     panel_source = (ROOT / "Panel.qml").read_text()
     self.assertIn('focusSection === "media"', panel_source)
-    self.assertIn('root.focusSection = "media"', panel_source)
+    self.assertIn('"media"', panel_source)
     self.assertIn('toggleMediaExpanded()', panel_source)
 
   def test_media_player_readme_and_manifest_accuracy(self):

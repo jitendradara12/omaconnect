@@ -41,6 +41,7 @@ KeyboardPanel {
     property bool commandsExpanded: false
     property int commandSelectedIndex: 0
     property bool networkExpanded: false
+    property int networkSelectedIndex: 0
     property string unpairConfirmingId: ""
 
     function toggleMediaExpanded() {
@@ -109,6 +110,54 @@ KeyboardPanel {
                 return
             }
             root.selectedIndex = Math.max(0, Math.min(list.length - 1, root.selectedIndex))
+        }
+    }
+
+    readonly property var visibleSections: {
+        var list = ["devices"]
+        if (availableActions.length > 0) list.push("actions")
+        if (mediaPlayerVisible) list.push("media")
+        if (remoteCommandsVisible) list.push("commands")
+        if (networkVisible) list.push("network")
+        return list
+    }
+
+    onVisibleSectionsChanged: {
+        if (visibleSections.indexOf(focusSection) === -1) {
+            focusSection = visibleSections.length > 0 ? visibleSections[0] : "devices"
+        }
+    }
+
+    function getNetworkItemCount() {
+        if (!networkExpanded) return 1
+        var peers = (service && service.tailscaleRunning && networkSection) ? networkSection.filteredPeers.length : 0
+        var saved = (service && service.customAddresses) ? service.customAddresses.length : 0
+        return 1 + peers + saved
+    }
+
+    function navigateNextSection() {
+        var idx = visibleSections.indexOf(focusSection)
+        if (idx === -1) idx = 0
+        var nextIdx = (idx + 1) % visibleSections.length
+        root.focusSection = visibleSections[nextIdx]
+        if (root.focusSection === "actions") actionSelectedIndex = 0
+        else if (root.focusSection === "media") mediaControlIndex = mediaExpanded ? 0 : 1
+        else if (root.focusSection === "commands") commandSelectedIndex = 0
+        else if (root.focusSection === "network") networkSelectedIndex = 0
+    }
+
+    function navigatePrevSection() {
+        var idx = visibleSections.indexOf(focusSection)
+        if (idx === -1) idx = 0
+        var prevIdx = (idx - 1 + visibleSections.length) % visibleSections.length
+        root.focusSection = visibleSections[prevIdx]
+        if (root.focusSection === "actions") actionSelectedIndex = Math.max(0, availableActions.length - 1)
+        else if (root.focusSection === "media") mediaControlIndex = mediaExpanded ? 2 : 1
+        else if (root.focusSection === "commands") {
+            var cmds = (service && service.remoteCommands) ? service.remoteCommands : []
+            commandSelectedIndex = commandsExpanded ? Math.max(0, cmds.length - 1) : 0
+        } else if (root.focusSection === "network") {
+            networkSelectedIndex = networkExpanded ? Math.max(0, getNetworkItemCount() - 1) : 0
         }
     }
 
@@ -308,6 +357,7 @@ KeyboardPanel {
 
     function toggleNetworkExpanded() {
         networkExpanded = !networkExpanded
+        networkSelectedIndex = 0
         if (networkExpanded && service) {
             service.refreshTailscale()
         }
@@ -373,7 +423,19 @@ KeyboardPanel {
                 service.fetchRemoteCommands(device.id)
             }
         } else if (focusSection === "network" && service) {
-            toggleNetworkExpanded()
+            if (!networkExpanded || networkSelectedIndex === 0) {
+                toggleNetworkExpanded()
+            } else {
+                var peers = (service.tailscaleRunning && networkSection) ? networkSection.filteredPeers : []
+                if (networkSelectedIndex <= peers.length) {
+                    var peer = peers[networkSelectedIndex - 1]
+                    if (peer && service) service.addCustomAddress(peer.address)
+                } else {
+                    var savedIdx = networkSelectedIndex - 1 - peers.length
+                    var saved = service.customAddresses ? service.customAddresses : []
+                    if (savedIdx < saved.length && service) service.removeCustomAddress(saved[savedIdx])
+                }
+            }
         }
     }
 
@@ -400,193 +462,55 @@ KeyboardPanel {
             var key = String(value).toLowerCase()
             if (key === "r" && root.service) root.service.refresh(true)
             else if (key === "j" || key === "down") {
-                if (root.focusSection === "network") root.focusSection = "devices"
-                else if (root.focusSection === "commands" && root.commandsExpanded) {
-                    var cmdsD = (root.service && root.service.remoteCommands) ? root.service.remoteCommands : []
-                    if (cmdsD.length > 0 && root.commandSelectedIndex < cmdsD.length - 1) root.selectCommand(1)
-                    else if (root.networkVisible) root.focusSection = "network"
-                    else root.focusSection = "devices"
+                if (root.focusSection === "devices") {
+                    var devList = (root.service && root.service.devices) ? root.service.devices : []
+                    if (devList.length > 0 && root.selectedIndex < devList.length - 1) root.select(1)
+                    else root.navigateNextSection()
+                } else if (root.focusSection === "commands" && root.commandsExpanded) {
+                    var cmdList = (root.service && root.service.remoteCommands) ? root.service.remoteCommands : []
+                    if (cmdList.length > 0 && root.commandSelectedIndex < cmdList.length - 1) root.selectCommand(1)
+                    else root.navigateNextSection()
+                } else if (root.focusSection === "network" && root.networkExpanded) {
+                    if (root.networkSelectedIndex < root.getNetworkItemCount() - 1) root.networkSelectedIndex++
+                    else root.navigateNextSection()
+                } else {
+                    root.navigateNextSection()
                 }
-                else if (root.focusSection === "commands") {
-                    if (root.networkVisible) root.focusSection = "network"
-                    else root.focusSection = "devices"
-                }
-                else if (root.focusSection === "media") {
-                    if (root.remoteCommandsVisible) root.focusSection = "commands"
-                    else if (root.networkVisible) root.focusSection = "network"
-                    else root.focusSection = "devices"
-                }
-                else if (root.focusSection === "actions") {
-                    var actsD = root.availableActions
-                    if (actsD.length > 0 && root.actionSelectedIndex < actsD.length - 1) root.actionSelectedIndex++
-                    else if (root.mediaPlayerVisible) root.focusSection = "media"
-                    else if (root.remoteCommandsVisible) root.focusSection = "commands"
-                    else if (root.networkVisible) root.focusSection = "network"
-                    else root.focusSection = "devices"
-                }
-                else root.select(1)
             }
             else if (key === "k" || key === "up") {
-                if (root.focusSection === "network") {
-                    if (root.remoteCommandsVisible) root.focusSection = "commands"
-                    else if (root.mediaPlayerVisible) root.focusSection = "media"
-                    else {
-                        var actsN = root.availableActions
-                        if (actsN.length > 0) {
-                            root.focusSection = "actions"
-                            root.actionSelectedIndex = actsN.length - 1
-                        } else root.focusSection = "devices"
-                    }
-                }
-                else if (root.focusSection === "commands" && root.commandsExpanded) {
+                if (root.focusSection === "devices") {
+                    if (root.selectedIndex > 0) root.select(-1)
+                    else root.navigatePrevSection()
+                } else if (root.focusSection === "commands" && root.commandsExpanded) {
                     if (root.commandSelectedIndex > 0) root.selectCommand(-1)
-                    else {
-                        if (root.mediaPlayerVisible) root.focusSection = "media"
-                        else {
-                            var actsU = root.availableActions
-                            if (actsU.length > 0) {
-                                root.focusSection = "actions"
-                                root.actionSelectedIndex = actsU.length - 1
-                            } else root.focusSection = "devices"
-                        }
-                    }
+                    else root.navigatePrevSection()
+                } else if (root.focusSection === "network" && root.networkExpanded) {
+                    if (root.networkSelectedIndex > 0) root.networkSelectedIndex--
+                    else root.navigatePrevSection()
+                } else {
+                    root.navigatePrevSection()
                 }
-                else if (root.focusSection === "commands") {
-                    if (root.mediaPlayerVisible) root.focusSection = "media"
-                    else {
-                        var actsUC = root.availableActions
-                        if (actsUC.length > 0) {
-                            root.focusSection = "actions"
-                            root.actionSelectedIndex = actsUC.length - 1
-                        } else root.focusSection = "devices"
-                    }
-                }
-                else if (root.focusSection === "media") {
-                    var actsUM = root.availableActions
-                    if (actsUM.length > 0) {
-                        root.focusSection = "actions"
-                        root.actionSelectedIndex = actsUM.length - 1
-                    } else root.focusSection = "devices"
-                }
-                else if (root.focusSection === "actions") {
-                    if (root.actionSelectedIndex > 0) root.actionSelectedIndex--
-                    else root.focusSection = "devices"
-                }
-                else root.select(-1)
             }
             else if (key === "l" || key === "right") {
-                if (root.focusSection === "devices") {
-                    var availableL0 = root.availableActions
-                    if (availableL0.length > 0) {
-                        root.focusSection = "actions"
-                        root.actionSelectedIndex = 0
-                    } else if (root.mediaPlayerVisible) {
-                        root.focusSection = "media"
-                    } else if (root.remoteCommandsVisible) {
-                        root.focusSection = "commands"
-                    } else if (root.networkVisible) {
-                        root.focusSection = "network"
-                    }
-                }
-                else if (root.focusSection === "actions") {
-                    var availableL = root.availableActions
-                    if (root.actionSelectedIndex < availableL.length - 1) {
-                        root.actionSelectedIndex++
-                    } else if (root.mediaPlayerVisible) {
-                        root.focusSection = "media"
-                    } else if (root.remoteCommandsVisible) {
-                        root.focusSection = "commands"
-                    } else if (root.networkVisible) {
-                        root.focusSection = "network"
-                    } else {
-                        root.focusSection = "devices"
-                    }
-                }
-                else if (root.focusSection === "media") {
+                if (root.focusSection === "actions") {
+                    if (root.actionSelectedIndex < root.availableActions.length - 1) root.actionSelectedIndex++
+                    else root.navigateNextSection()
+                } else if (root.focusSection === "media") {
                     if (root.mediaExpanded && root.mediaControlIndex < 2) root.mediaControlIndex++
-                    else if (root.mediaExpanded) {
-                        if (root.remoteCommandsVisible) root.focusSection = "commands"
-                        else if (root.networkVisible) root.focusSection = "network"
-                        else root.focusSection = "devices"
-                    }
-                    else if (root.remoteCommandsVisible) root.focusSection = "commands"
-                    else if (root.networkVisible) root.focusSection = "network"
-                    else root.focusSection = "devices"
+                    else root.navigateNextSection()
+                } else {
+                    root.navigateNextSection()
                 }
-                else if (root.focusSection === "commands") {
-                    if (root.networkVisible) root.focusSection = "network"
-                    else root.focusSection = "devices"
-                }
-                else if (root.focusSection === "network") root.focusSection = "devices"
             }
             else if (key === "h" || key === "left") {
-                if (root.focusSection === "network") {
-                    if (root.remoteCommandsVisible) {
-                        root.focusSection = "commands"
-                    } else if (root.mediaPlayerVisible) {
-                        root.focusSection = "media"
-                    } else {
-                        var availableNetH = root.availableActions
-                        if (availableNetH.length > 0) {
-                            root.focusSection = "actions"
-                            root.actionSelectedIndex = availableNetH.length - 1
-                        } else {
-                            root.focusSection = "devices"
-                        }
-                    }
-                }
-                else if (root.focusSection === "commands") {
-                    if (root.mediaPlayerVisible) {
-                        root.focusSection = "media"
-                    } else {
-                        var availableCmdH = root.availableActions
-                        if (availableCmdH.length > 0) {
-                            root.focusSection = "actions"
-                            root.actionSelectedIndex = availableCmdH.length - 1
-                        } else {
-                            root.focusSection = "devices"
-                        }
-                    }
-                }
-                else if (root.focusSection === "media") {
-                    if (root.mediaExpanded && root.mediaControlIndex > 0) {
-                        root.mediaControlIndex--
-                    } else if (root.mediaExpanded) {
-                        var availableMedH0 = root.availableActions
-                        if (availableMedH0.length > 0) {
-                            root.focusSection = "actions"
-                            root.actionSelectedIndex = availableMedH0.length - 1
-                        } else {
-                            root.focusSection = "devices"
-                        }
-                    } else {
-                        var availableMedH = root.availableActions
-                        if (availableMedH.length > 0) {
-                            root.focusSection = "actions"
-                            root.actionSelectedIndex = availableMedH.length - 1
-                        } else {
-                            root.focusSection = "devices"
-                        }
-                    }
-                }
-                else if (root.focusSection === "actions") {
-                    if (root.actionSelectedIndex > 0) {
-                        root.actionSelectedIndex--
-                    } else {
-                        root.focusSection = "devices"
-                    }
-                }
-                else if (root.focusSection === "devices") {
-                    if (root.networkVisible) root.focusSection = "network"
-                    else if (root.remoteCommandsVisible) root.focusSection = "commands"
-                    else if (root.mediaPlayerVisible) root.focusSection = "media"
-                    else {
-                        var availableDevH = root.availableActions
-                        if (availableDevH.length > 0) {
-                            root.focusSection = "actions"
-                            root.actionSelectedIndex = availableDevH.length - 1
-                        }
-                    }
+                if (root.focusSection === "actions") {
+                    if (root.actionSelectedIndex > 0) root.actionSelectedIndex--
+                    else root.navigatePrevSection()
+                } else if (root.focusSection === "media") {
+                    if (root.mediaExpanded && root.mediaControlIndex > 0) root.mediaControlIndex--
+                    else root.navigatePrevSection()
+                } else {
+                    root.navigatePrevSection()
                 }
             }
             else if (key === "p" && root.focusSection === "devices") {
