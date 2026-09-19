@@ -379,7 +379,7 @@ KeyboardPanel {
         id: keyCatcher
         anchors.fill: parent
 
-        blocked: root.activeComposer !== "none" || !!(composerSection && ((composerSection.pingInput && composerSection.pingInput.activeFocus) || (composerSection.textInput && composerSection.textInput.activeFocus)))
+        blocked: root.activeComposer !== "none" || !!(composerSection && ((composerSection.pingInput && composerSection.pingInput.activeFocus) || (composerSection.textInput && composerSection.textInput.activeFocus))) || !!(networkSection && networkSection.addressInput && networkSection.addressInput.activeFocus)
         onMoveRequested: function(dx, dy) {
             if (!root.cursorActive) root.cursorActive = true
         }

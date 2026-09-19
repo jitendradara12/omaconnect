@@ -1880,6 +1880,13 @@ class StateTests(unittest.TestCase):
         "📱 85%",
     )
 
+  def test_network_input_blocks_key_catcher(self):
+    panel_source = (ROOT / "Panel.qml").read_text()
+    self.assertIn("networkSection.addressInput.activeFocus", panel_source)
+    network_source = (ROOT / "components" / "NetworkSection.qml").read_text()
+    self.assertIn("property alias addressInput: addressInput", network_source)
+    self.assertIn("Keys.onEscapePressed", network_source)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

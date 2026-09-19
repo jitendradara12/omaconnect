@@ -17,6 +17,7 @@ Column {
     readonly property var service: panel ? panel.service : null
     readonly property color foreground: bar ? bar.foreground : "#ffffff"
     readonly property string fontFamily: bar ? bar.fontFamily : "sans-serif"
+    property alias addressInput: addressInput
     readonly property var filteredPeers: service ? service.filteredTailscalePeers(addressInput.text).slice(0, 8) : []
 
     readonly property bool hasCommandsAbove: !!(panel && panel.remoteCommandsVisible)
@@ -155,6 +156,10 @@ Column {
                 }
                 onAccepted: {
                     if (root.service && root.service.addCustomAddress(text)) text = ""
+                }
+                Keys.onEscapePressed: {
+                    focus = false
+                    if (root.panel && root.panel.focusTarget) root.panel.focusTarget.forceActiveFocus()
                 }
             }
 
