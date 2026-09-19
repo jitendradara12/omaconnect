@@ -11,10 +11,12 @@ Item {
     property bool scanning: false
     property string discoveryState: "starting"
     property string discoveryMessage: "Checking KDE Connect"
-    property string pluginPath: ""
     property string actionState: "idle"
     property string actionMessage: ""
     property string actionError: ""
+    property string fileTransferState: "idle"
+    property string fileTransferMessage: ""
+    property string fileTransferError: ""
 
     Timer {
         id: actionDismissTimer
@@ -23,6 +25,20 @@ Item {
         onTriggered: {
             root.actionMessage = ""
             root.actionError = ""
+        }
+    }
+
+    Timer {
+        id: fileTransferDismissTimer
+        interval: 4000
+        repeat: false
+        onTriggered: {
+            if (root.fileBusy || root.fileTransferState === "transferring") return
+            root.fileTransferMessage = ""
+            root.fileTransferError = ""
+            if (root.fileTransferState === "accepted" || root.fileTransferState === "cancelled" || root.fileTransferState === "failed") {
+                root.fileTransferState = "idle"
+            }
         }
     }
 
@@ -35,17 +51,37 @@ Item {
         if (actionMessage !== "" || actionError !== "") actionDismissTimer.restart()
         else actionDismissTimer.stop()
     }
+
+    onFileTransferMessageChanged: {
+        if (root.fileBusy || root.fileTransferState === "transferring") {
+            fileTransferDismissTimer.stop()
+        } else if (fileTransferMessage !== "" || fileTransferError !== "") {
+            fileTransferDismissTimer.restart()
+        } else {
+            fileTransferDismissTimer.stop()
+        }
+    }
+
+    onFileTransferErrorChanged: {
+        if (root.fileBusy || root.fileTransferState === "transferring") {
+            fileTransferDismissTimer.stop()
+        } else if (fileTransferMessage !== "" || fileTransferError !== "") {
+            fileTransferDismissTimer.restart()
+        } else {
+            fileTransferDismissTimer.stop()
+        }
+    }
     property string selectedDeviceId: ""
     property var devices: []
     property var remoteCommands: []
     property bool commandsLoading: false
-    property string commandTargetId: ""
     property int generation: 0
     property int actionGeneration: 0
+    property int fileTransferGeneration: 0
+    property bool scanQueued: false
     property var pendingPairing: ({})
     property var pairingRequestTimes: ({})
     property bool fileBusy: false
-    property var capabilities: ({})
     property int monitorRestartCount: 0
     property bool tailscaleInstalled: false
     property bool tailscaleRunning: false
@@ -91,25 +127,32 @@ Item {
     function selectDevice(id) {
         var next = deviceById(id)
         if (!next) return
-        if (selectedDeviceId !== next.id) {
-            actionState = "idle"
-            actionMessage = ""
-            actionError = ""
-            fileBusy = false
-            mediaState = emptyMediaState()
-            mediaLoading = false
-            mediaRefreshPending = false
-            if (mediaStatusProcess.running) mediaStatusProcess.running = false
-            if (mediaActionProcess.running) mediaActionProcess.running = false
-            if (mediaPlayerProcess.running) mediaPlayerProcess.running = false
-        }
+        if (selectedDeviceId === next.id) return
         selectedDeviceId = next.id
+        actionState = "idle"
+        actionMessage = ""
+        actionError = ""
+        fileBusy = false
+        fileTransferState = "idle"
+        fileTransferMessage = ""
+        fileTransferError = ""
+        mediaState = emptyMediaState()
+        mediaLoading = false
+        mediaRefreshPending = false
+        actionGeneration += 1
+        fileTransferGeneration += 1
+        if (mediaStatusProcess.running) mediaStatusProcess.running = false
+        if (mediaActionProcess.running) mediaActionProcess.running = false
+        if (mediaPlayerProcess.running) mediaPlayerProcess.running = false
+        if (actionProcess.running) actionProcess.running = false
+        if (fileTransferProcess.running) fileTransferProcess.running = false
+        if (filePickerProcess.running) filePickerProcess.running = false
         remoteCommands = []
-        commandTargetId = ""
         commandsLoading = false
         if (commandsProcess.running) commandsProcess.running = false
         if (next.paired && next.reachable && next.capabilities && next.capabilities.media) {
             fetchMediaStatus(next.id)
+            requestPlayerList(next.id)
         }
     }
 
@@ -118,6 +161,9 @@ Item {
         actionMessage = ""
         actionError = ""
         fileBusy = false
+        fileTransferState = "idle"
+        fileTransferMessage = ""
+        fileTransferError = ""
     }
 
     function safeError(exitCode, operation) {
@@ -133,6 +179,9 @@ Item {
             copy[String(id)] = state
         } else {
             delete copy[String(id)]
+            var times = Object.assign({}, pairingRequestTimes)
+            delete times[String(id)]
+            pairingRequestTimes = times
         }
         pendingPairing = copy
     }
@@ -178,7 +227,7 @@ Item {
                 var leftGroups = halves[0] ? halves[0].split(":") : []
                 var rightGroups = halves[1] ? halves[1].split(":") : []
                 var compressedGroups = leftGroups.concat(rightGroups)
-                if (compressedGroups.length < 8 && compressedGroups.every(function(group) { return /^[0-9a-fA-F]{1,4}$/.test(group) })) return ""
+                if (compressedGroups.length > 0 && compressedGroups.length < 8 && compressedGroups.every(function(group) { return /^[0-9a-fA-F]{1,4}$/.test(group) })) return ""
             }
         }
         return "Enter a literal IPv4 or IPv6 address"
@@ -339,23 +388,8 @@ Item {
     function refresh(forceNetwork) {
         if (forceNetwork) refreshTailscale()
         if (scanProcess.running) {
-            if (!forceNetwork) return
-            scanProcess.running = false
-        }
-        if (forceNetwork) {
-            var now = Date.now()
-            var copy = Object.assign({}, pendingPairing)
-            var changed = false
-            for (var devId in copy) {
-                if (copy[devId] === "requesting") {
-                    var reqTime = pairingRequestTimes[devId] || 0
-                    if (!reqTime || (now - reqTime >= 10000)) {
-                        delete copy[devId]
-                        changed = true
-                    }
-                }
-            }
-            if (changed) pendingPairing = copy
+            if (forceNetwork) scanQueued = true
+            return
         }
         var nextGeneration = generation + 1
         generation = nextGeneration
@@ -423,15 +457,6 @@ Item {
         return "󰁹"
     }
 
-    function deviceNetworkText(device) {
-        if (!device || !device.networkType) return ""
-        var type = String(device.networkType).trim()
-        if (!type || type === "null") return ""
-        var str = device.networkStrength
-        if (typeof str === "number" && str >= 0) return type + " (" + str + "/4)"
-        return type
-    }
-
     function deviceNetworkIcon(device) {
         if (!device || !device.networkType) return "󰀂"
         var str = device.networkStrength
@@ -484,13 +509,13 @@ Item {
 
     function openSmsApp(id) {
         var device = deviceById(id)
-        if (!device || !canAct(id)) return false
+        if (!device) return false
         return startAction(id, ["bash", getSmsScriptPath(), String(id)], "SMS app opened", "SMS app")
     }
 
     function applyScan(output, targetGeneration) {
-        scanning = false
         if (targetGeneration !== generation) return
+        scanning = false
         var next = []
         var nextAddresses = []
         var addressesReady = false
@@ -511,11 +536,34 @@ Item {
         devices = next
         customAddressesReady = addressesReady
         if (addressesReady) customAddresses = nextAddresses
+        if (!next.length) {
+            selectedDeviceId = ""
+            remoteCommands = []
+            commandsLoading = false
+            mediaState = emptyMediaState()
+            mediaLoading = false
+            mediaRefreshPending = false
+        } else {
+            var current = deviceById(selectedDeviceId)
+            if (current && current.capabilities) {
+                if (!current.capabilities.commands) {
+                    remoteCommands = []
+                    commandsLoading = false
+                }
+                if (!current.capabilities.media) {
+                    mediaState = emptyMediaState()
+                    mediaLoading = false
+                    mediaRefreshPending = false
+                } else if (current.paired && current.reachable && !mediaState.player && !mediaState.title && mediaState.playerList.length === 0 && !mediaLoading) {
+                    fetchMediaStatus(current.id)
+                    requestPlayerList(current.id)
+                }
+            }
+        }
         next.forEach(function(dev) {
             if (dev.paired) {
                 if (root.pendingPairing[dev.id] === "requesting") {
                     root.setPendingPairing(dev.id, "")
-                    pairingWatchdogTimer.stop()
                     if (root.selectedDeviceId === dev.id || !root.selectedDeviceId) {
                         root.actionState = "accepted"
                         root.actionMessage = "Device paired"
@@ -530,8 +578,33 @@ Item {
                 }
             }
         })
+        var stillRequesting = false
+        for (var pendingId in root.pendingPairing) {
+            if (root.pendingPairing[pendingId] === "requesting") {
+                stillRequesting = true
+                break
+            }
+        }
+        if (!stillRequesting) pairingWatchdogTimer.stop()
         if (!deviceById(selectedDeviceId)) {
-            if (next.length) selectDevice(next[0].id)
+            if (next.length) {
+                var preferred = null
+                for (var d = 0; d < next.length; d++) {
+                    if (next[d].paired && next[d].reachable) {
+                        preferred = next[d]
+                        break
+                    }
+                }
+                if (!preferred) {
+                    for (var d2 = 0; d2 < next.length; d2++) {
+                        if (next[d2].paired) {
+                            preferred = next[d2]
+                            break
+                        }
+                    }
+                }
+                selectDevice((preferred || next[0]).id)
+            }
             else clearActionState()
         }
         daemonAvailable = scanProcess.exitCode === 0
@@ -546,14 +619,18 @@ Item {
             discoveryState = "unavailable"
             discoveryMessage = "KDE Connect unavailable"
         }
+        if (scanQueued) {
+            scanQueued = false
+            root.refresh(true)
+        }
     }
 
     function startAction(id, command, acceptedMessage, operation) {
         if (actionProcess.running || pairProcess.running || !canAct(id)) {
+            var busy = actionProcess.running || pairProcess.running
             actionState = "blocked"
-            actionError = "Device must be paired and reachable"
+            actionError = busy ? "Another action is already running" : "Device must be paired and reachable"
             actionMessage = ""
-            fileBusy = false
             return false
         }
         actionGeneration += 1
@@ -565,7 +642,6 @@ Item {
         actionState = "running"
         actionMessage = "Requesting " + operation
         actionError = ""
-        fileBusy = operation === "file transfer"
         actionProcess.running = true
         return true
     }
@@ -579,7 +655,12 @@ Item {
             return false
         }
         var device = deviceById(id)
-        if (!device || !device.capabilities.ping || !canAct(id)) return false
+        if (!device || !device.capabilities.ping) {
+            actionState = "blocked"
+            actionError = "Ping not supported by device"
+            actionMessage = ""
+            return false
+        }
         return startAction(id, ["kdeconnect-cli", "-d", String(id), "--ping-msg", text], "Ping sent", "ping")
     }
 
@@ -592,25 +673,51 @@ Item {
             return false
         }
         var device = deviceById(id)
-        if (!device || !device.capabilities.text || !canAct(id)) return false
+        if (!device || !device.capabilities.text) {
+            actionState = "blocked"
+            actionError = "Text share not supported by device"
+            actionMessage = ""
+            return false
+        }
         return startAction(id, ["kdeconnect-cli", "-d", String(id), "--share-text", value], "Text sent", "text share")
     }
 
     function ringDevice(id) {
         var device = deviceById(id)
-        if (!device || !device.capabilities.ring) return false
+        if (!device || !device.capabilities.ring) {
+            actionState = "blocked"
+            actionError = "Ring not supported by device"
+            actionMessage = ""
+            return false
+        }
         return startAction(id, ["kdeconnect-cli", "-d", String(id), "--ring"], "Ringing device...", "ring")
     }
 
     function sendClipboard(id) {
         var device = deviceById(id)
-        if (!device || !device.capabilities.clipboard) return false
+        if (!device || !device.capabilities.clipboard) {
+            actionState = "blocked"
+            actionError = "Clipboard not supported by device"
+            actionMessage = ""
+            return false
+        }
         return startAction(id, ["kdeconnect-cli", "-d", String(id), "--send-clipboard"], "Clipboard synced", "clipboard")
     }
 
     function startFileSelection(id) {
         var device = deviceById(id)
-        if (!device || !device.capabilities.file || !canAct(id)) return false
+        if (!device || !device.capabilities.file) {
+            actionState = "blocked"
+            actionError = "File transfer not supported by device"
+            actionMessage = ""
+            return false
+        }
+        if (!canAct(id)) {
+            actionState = "blocked"
+            actionError = "Device must be paired and reachable"
+            actionMessage = ""
+            return false
+        }
         if (filePickerProcess.running) return false
         fileBusy = true
         actionState = "busy"
@@ -629,6 +736,16 @@ Item {
         actionError = ""
     }
 
+    function cancelFileTransfer() {
+        fileTransferGeneration += 1
+        if (filePickerProcess.running) cancelFileSelection()
+        if (fileTransferProcess.running) fileTransferProcess.running = false
+        fileBusy = false
+        fileTransferState = "cancelled"
+        fileTransferMessage = "File transfer cancelled"
+        fileTransferError = ""
+    }
+
     function sendFile(id, path) {
         var value = String(path || "").trim()
         if (value.indexOf("file://") === 0) {
@@ -638,19 +755,43 @@ Item {
             } catch (e) {}
         }
         var device = deviceById(id)
-        if (!value || value.indexOf("\u0000") !== -1 || !device || !device.capabilities.file) {
+        if (!value || value.indexOf("\u0000") !== -1 || !device || !canAct(id) || !device.capabilities.file) {
             fileBusy = false
+            fileTransferState = "failed"
+            fileTransferMessage = ""
+            fileTransferError = (!device || (device && !canAct(id))) ? "Device must be paired and reachable" : "File transfer not supported by device"
+            if (!value || value.indexOf("\u0000") !== -1) fileTransferError = "File transfer failed"
             return false
         }
-        return startAction(id, ["kdeconnect-cli", "-d", String(id), "--share", value], "File sent", "file transfer")
+        if (fileTransferProcess.running) {
+            fileTransferState = "blocked"
+            fileTransferError = "A file transfer is already running"
+            fileTransferMessage = ""
+            return false
+        }
+        fileTransferGeneration += 1
+        fileTransferProcess.targetGeneration = fileTransferGeneration
+        fileTransferProcess.targetDeviceId = String(id)
+        fileTransferProcess.command = ["kdeconnect-cli", "-d", String(id), "--share", value]
+        fileBusy = true
+        fileTransferState = "transferring"
+        fileTransferMessage = "Sending file..."
+        fileTransferError = ""
+        fileTransferProcess.running = true
+        return true
     }
 
     function fetchRemoteCommands(id) {
         var device = deviceById(id)
-        if (commandsProcess.running || pairProcess.running || !canAct(id) || !device.capabilities.commands) return false
+        if (commandsProcess.running || pairProcess.running || !canAct(id) || !device.capabilities.commands) {
+            if (device && !commandsProcess.running && !pairProcess.running && canAct(id) && !device.capabilities.commands) {
+                actionState = "blocked"
+                actionError = "Remote commands not supported by device"
+                actionMessage = ""
+            }
+            return false
+        }
         commandsLoading = true
-        commandTargetId = String(id)
-        commandsProcess.targetGeneration = generation
         commandsProcess.targetDeviceId = String(id)
         commandsProcess.command = ["kdeconnect-cli", "-d", String(id), "--list-commands"]
         commandsProcess.running = true
@@ -703,13 +844,21 @@ Item {
     function executeRemoteCommand(id, key) {
         var value = String(key || "").trim()
         var device = deviceById(id)
-        if (!value || !device || !device.capabilities.commands) return false
+        if (!value || !device || !device.capabilities.commands) {
+            if (device && !device.capabilities.commands) {
+                actionState = "blocked"
+                actionError = "Remote commands not supported by device"
+                actionMessage = ""
+            }
+            return false
+        }
         return startAction(id, ["kdeconnect-cli", "-d", String(id), "--execute-command", value], "Command executed", "remote command")
     }
 
     function pairDevice(id) {
         var device = deviceById(id)
         if (!device || pairProcess.running || actionProcess.running || !device.capabilities.pair) return false
+        if (pendingPairing[String(id)] === "requesting" || pendingPairing[String(id)] === "removing" || pendingPairing[String(id)] === "unpair_confirm") return false
         setPendingPairing(id, "requesting")
         var times = Object.assign({}, pairingRequestTimes)
         times[String(id)] = Date.now()
@@ -717,9 +866,8 @@ Item {
         actionState = "accepted"
         actionMessage = "Pair request sent"
         actionError = ""
-        pairingWatchdogTimer.restart()
+        if (!pairingWatchdogTimer.running) pairingWatchdogTimer.start()
         pairProcess.targetDeviceId = String(id)
-        pairProcess.targetGeneration = generation
         pairProcess.command = ["kdeconnect-cli", "-d", String(id), "--pair"]
         pairProcess.running = true
         return true
@@ -750,13 +898,12 @@ Item {
 
     function unpairDevice(id) {
         var device = deviceById(id)
-        if (!device || pairProcess.running || actionProcess.running || !device.capabilities.pair) return false
+        if (!device || !device.paired || pairProcess.running || actionProcess.running || !device.capabilities.pair) return false
         setPendingPairing(id, "removing")
         actionState = "accepted"
         actionMessage = "Device unpaired"
         actionError = ""
         pairProcess.targetDeviceId = String(id)
-        pairProcess.targetGeneration = generation
         pairProcess.command = ["kdeconnect-cli", "-d", String(id), "--unpair"]
         pairProcess.running = true
         return true
@@ -794,7 +941,20 @@ Item {
     }
 
     function mediaPlayPause(id) {
-        return sendMediaAction(id, "PlayPause")
+        var devId = id || selectedDeviceId
+        var prevPlaying = mediaState ? mediaState.isPlaying : false
+        if (devId === selectedDeviceId && mediaState) {
+            var updated = Object.assign({}, mediaState)
+            updated.isPlaying = !prevPlaying
+            mediaState = updated
+        }
+        var sent = sendMediaAction(devId, "PlayPause")
+        if (!sent && devId === selectedDeviceId && mediaState) {
+            var reverted = Object.assign({}, mediaState)
+            reverted.isPlaying = prevPlaying
+            mediaState = reverted
+        }
+        return sent
     }
 
     function mediaNext(id) {
@@ -803,6 +963,17 @@ Item {
 
     function mediaPrevious(id) {
         return sendMediaAction(id, "Previous")
+    }
+
+    function requestPlayerList(id) {
+        var devId = id || selectedDeviceId
+        var device = deviceById(devId)
+        if (!device || !canAct(devId) || !device.capabilities || !device.capabilities.media) return false
+        if (mediaPlayerProcess.running) return false
+        mediaPlayerProcess.targetDeviceId = String(devId)
+        mediaPlayerProcess.command = ["bash", getMediaScriptPath(), "request_players", String(devId)]
+        mediaPlayerProcess.running = true
+        return true
     }
 
     function mediaSelectPlayer(id, playerName) {
@@ -817,8 +988,12 @@ Item {
     }
 
     function handleMediaProcessExit(code, targetDeviceId) {
-        if (code === 0 && targetDeviceId === root.selectedDeviceId) {
-            root.fetchMediaStatus(targetDeviceId)
+        if (targetDeviceId === root.selectedDeviceId) {
+            if (code !== 0) {
+                root.fetchMediaStatus(targetDeviceId)
+            } else {
+                mediaDebounceTimer.restart()
+            }
         }
     }
 
@@ -838,12 +1013,11 @@ Item {
     Process {
         id: commandsProcess
         property string targetDeviceId: ""
-        property int targetGeneration: 0
         stdout: StdioCollector { waitForEnd: true }
         stderr: StdioCollector { waitForEnd: true }
         onExited: function(code) {
             root.commandsLoading = false
-            if (targetGeneration !== root.generation || targetDeviceId !== root.selectedDeviceId) return
+            if (targetDeviceId !== root.selectedDeviceId) return
             root.remoteCommands = code === 0 ? root.parseRemoteCommands(stdout.text) : []
         }
     }
@@ -857,7 +1031,6 @@ Item {
         stderr: StdioCollector { waitForEnd: true }
         onExited: function(code) {
             if (targetGeneration !== root.actionGeneration || targetDeviceId !== root.selectedDeviceId) return
-            root.fileBusy = false
             root.actionState = code === 0 ? "accepted" : "failed"
             root.actionMessage = code === 0 ? acceptedMessage : ""
             root.actionError = code === 0 ? "" : root.safeError(code, operation)
@@ -865,20 +1038,43 @@ Item {
     }
 
     Process {
-        id: pairProcess
+        id: fileTransferProcess
         property string targetDeviceId: ""
         property int targetGeneration: 0
         stderr: StdioCollector { waitForEnd: true }
         onExited: function(code) {
+            root.fileBusy = false
+            if (targetGeneration !== root.fileTransferGeneration || targetDeviceId !== root.selectedDeviceId) return
+            root.fileTransferState = code === 0 ? "accepted" : "failed"
+            root.fileTransferMessage = code === 0 ? "File sent" : ""
+            root.fileTransferError = code === 0 ? "" : root.safeError(code, "file transfer")
+        }
+    }
+
+    Process {
+        id: pairProcess
+        property string targetDeviceId: ""
+        stderr: StdioCollector { waitForEnd: true }
+        onExited: function(code) {
             var isPair = pairProcess.command && pairProcess.command.indexOf("--pair") !== -1
             var op = isPair ? "pairing" : "unpairing"
-            if (code === 0) {
-                root.setPendingPairing(targetDeviceId, isPair ? "requesting" : "accepted")
+            if (isPair) {
+                if (code === 0) root.setPendingPairing(targetDeviceId, "requesting")
+                else {
+                    root.setPendingPairing(targetDeviceId, "")
+                    var stillRequesting = false
+                    for (var pendingId in root.pendingPairing) {
+                        if (root.pendingPairing[pendingId] === "requesting") {
+                            stillRequesting = true
+                            break
+                        }
+                    }
+                    if (!stillRequesting) pairingWatchdogTimer.stop()
+                }
             } else {
-                if (isPair) pairingWatchdogTimer.stop()
-                root.setPendingPairing(targetDeviceId, isPair ? "" : "failed")
+                root.setPendingPairing(targetDeviceId, "")
             }
-            if (targetGeneration !== root.generation || targetDeviceId !== root.selectedDeviceId) {
+            if (targetDeviceId !== root.selectedDeviceId) {
                 root.refresh()
                 return
             }
@@ -902,6 +1098,10 @@ Item {
         stderr: StdioCollector { waitForEnd: true }
         onExited: function(code) {
             root.setPendingPairing(targetDeviceId, "")
+            if (targetDeviceId !== root.selectedDeviceId) {
+                root.refresh()
+                return
+            }
             root.actionState = code === 0 ? "accepted" : "failed"
             root.actionMessage = code === 0 ? (accepting ? "Pairing response sent" : "Pairing request rejected") : ""
             root.actionError = code === 0 ? "" : root.safeError(code, accepting ? "pairing" : "pairing rejection")
@@ -909,38 +1109,85 @@ Item {
         }
     }
 
-    Timer { id: dbusDebounceTimer; interval: 300; repeat: false; onTriggered: root.refresh() }
-    Timer { id: mediaDebounceTimer; interval: 300; repeat: false; onTriggered: if (root.selectedDeviceId) root.fetchMediaStatus(root.selectedDeviceId) }
+    Timer { id: dbusDebounceTimer; interval: 500; repeat: false; onTriggered: root.refresh() }
+    Timer { id: mediaDebounceTimer; interval: 500; repeat: false; onTriggered: if (root.selectedDeviceId) root.fetchMediaStatus(root.selectedDeviceId) }
 
     Timer {
         id: pairingWatchdogTimer
-        interval: 30000
-        repeat: false
+        interval: 1000
+        repeat: true
         onTriggered: {
-            var hadPending = false
+            var now = Date.now()
+            var anyRequesting = false
+            var timedOutSelected = false
             for (var devId in root.pendingPairing) {
                 if (root.pendingPairing[devId] === "requesting") {
-                    root.setPendingPairing(devId, "")
-                    hadPending = true
+                    var reqTime = root.pairingRequestTimes[devId] || 0
+                    if (now - reqTime >= 30000) {
+                        root.setPendingPairing(devId, "")
+                        if (devId === root.selectedDeviceId) timedOutSelected = true
+                    } else {
+                        anyRequesting = true
+                    }
                 }
             }
-            if (hadPending || root.actionMessage === "Pair request sent") {
+            if (timedOutSelected) {
                 root.actionState = "failed"
                 root.actionMessage = ""
                 root.actionError = "Pairing timed out or rejected"
             }
+            if (!anyRequesting) pairingWatchdogTimer.stop()
         }
+    }
+
+    Timer {
+        id: monitorStabilityTimer
+        interval: 10000
+        repeat: false
+        // ponytail: sustained uptime resets backoff; immediate reset would pin crash loops at 1s
+        onTriggered: monitorRestartCount = 0
     }
 
     Process {
         id: signalProcess
-        command: ["dbus-monitor", "--session", "type='signal',sender='org.kde.kdeconnect'"]
+        command: [
+            "dbus-monitor", "--profile", "--session",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.kde.kdeconnect.daemon'",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.kde.kdeconnect.device'",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.kde.kdeconnect.device.battery'",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.kde.kdeconnect.device.connectivity_report'",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.kde.kdeconnect.device.mprisremote'",
+            "type='signal',sender='org.kde.kdeconnect',interface='org.freedesktop.DBus.Properties'"
+        ]
+        onRunningChanged: {
+            if (running) monitorStabilityTimer.restart()
+            else monitorStabilityTimer.stop()
+        }
         stdout: SplitParser { onRead: function(line) {
-            var value = String(line || "")
-            if (value.indexOf("device") !== -1 || value.indexOf("chargeChanged") !== -1 || value.indexOf("stateChanged") !== -1 || value.indexOf("refreshed") !== -1)
-                dbusDebounceTimer.restart()
-            if (value.indexOf("mpris") !== -1 || value.indexOf("PropertiesChanged") !== -1)
+            var value = String(line || "").trim()
+            if (!value) return
+            var isSignal = value.indexOf("sig\t") === 0 || value.indexOf("signal ") === 0
+            if (!isSignal) return
+
+            if (value.indexOf("/mprisremote") !== -1 || value.indexOf("org.kde.kdeconnect.device.mprisremote") !== -1) {
                 mediaDebounceTimer.restart()
+                return
+            }
+
+            if (value.indexOf("/battery") !== -1 ||
+                value.indexOf("/connectivity_report") !== -1 ||
+                value.indexOf("org.kde.kdeconnect.device.battery") !== -1 ||
+                value.indexOf("org.kde.kdeconnect.device.connectivity_report") !== -1 ||
+                value.indexOf("org.kde.kdeconnect.device") !== -1 ||
+                value.indexOf("org.kde.kdeconnect.daemon") !== -1 ||
+                value.indexOf("deviceAdded") !== -1 ||
+                value.indexOf("deviceRemoved") !== -1 ||
+                value.indexOf("deviceVisibilityChanged") !== -1 ||
+                value.indexOf("reachableChanged") !== -1 ||
+                value.indexOf("pairStateChanged") !== -1 ||
+                value.indexOf("chargeChanged") !== -1) {
+                dbusDebounceTimer.restart()
+            }
         } }
         onExited: {
             signalRestart.interval = Math.min(30000, 1000 * Math.pow(2, monitorRestartCount))
@@ -955,6 +1202,7 @@ Item {
         command: ["bash", getPickerScriptPath()]
         stdout: StdioCollector { waitForEnd: true }
         onExited: function(code) {
+            if (targetDeviceId !== root.selectedDeviceId) return
             var selectedPath = stdout.text.trim()
             if (code === 0 && selectedPath) {
                 root.sendFile(targetDeviceId, selectedPath)
@@ -1066,13 +1314,19 @@ Item {
             if (isCurrent && code === 0 && stdout.text.trim()) {
                 try {
                     var parsed = JSON.parse(stdout.text.trim())
+                    var parsedPlayerList = Array.isArray(parsed.playerList) ? parsed.playerList : []
+                    var activePlayer = String(parsed.player || "")
+                    if (!activePlayer && parsedPlayerList.length > 0) {
+                        activePlayer = parsedPlayerList[0]
+                        root.mediaSelectPlayer(targetDeviceId, activePlayer)
+                    }
                     root.mediaState = {
-                        isPlaying: parsed.isPlaying === true,
+                        isPlaying: (mediaActionProcess.running && root.mediaState) ? root.mediaState.isPlaying : (parsed.isPlaying === true),
                         title: String(parsed.title || ""),
                         artist: String(parsed.artist || ""),
                         album: String(parsed.album || ""),
-                        player: String(parsed.player || ""),
-                        playerList: Array.isArray(parsed.playerList) ? parsed.playerList : [],
+                        player: activePlayer,
+                        playerList: parsedPlayerList,
                         albumArt: String(parsed.albumArt || "")
                     }
                 } catch (e) {
@@ -1087,6 +1341,7 @@ Item {
                 root.mediaRefreshPending = false
                 Qt.callLater(function() { root.fetchMediaStatus(root.selectedDeviceId) })
             }
+            if (targetDeviceId !== root.selectedDeviceId) return
         }
     }
 
@@ -1109,5 +1364,5 @@ Item {
     Timer { id: signalRestart; repeat: false; onTriggered: if (!signalProcess.running) signalProcess.running = true }
     Timer { interval: 15000; running: !signalProcess.running; repeat: true; onTriggered: root.refresh() }
     Component.onCompleted: { root.refresh(); root.refreshTailscale(); signalProcess.running = true }
-    Component.onDestruction: { actionDismissTimer.stop(); dbusDebounceTimer.stop(); mediaDebounceTimer.stop(); pairingWatchdogTimer.stop(); signalRestart.stop(); signalProcess.running = false; scanProcess.running = false; commandsProcess.running = false; actionProcess.running = false; pairProcess.running = false; pairResponseProcess.running = false; filePickerProcess.running = false; tailscaleProcess.running = false; addressProcess.running = false; firewallProcess.running = false; installProcess.running = false; appProcess.running = false; mediaStatusProcess.running = false; mediaActionProcess.running = false; mediaPlayerProcess.running = false }
+    Component.onDestruction: { actionDismissTimer.stop(); fileTransferDismissTimer.stop(); dbusDebounceTimer.stop(); mediaDebounceTimer.stop(); pairingWatchdogTimer.stop(); monitorStabilityTimer.stop(); signalRestart.stop(); signalProcess.running = false; scanProcess.running = false; commandsProcess.running = false; actionProcess.running = false; fileTransferProcess.running = false; pairProcess.running = false; pairResponseProcess.running = false; filePickerProcess.running = false; tailscaleProcess.running = false; addressProcess.running = false; firewallProcess.running = false; installProcess.running = false; appProcess.running = false; mediaStatusProcess.running = false; mediaActionProcess.running = false; mediaPlayerProcess.running = false }
 }

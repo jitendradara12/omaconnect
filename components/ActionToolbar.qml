@@ -39,7 +39,7 @@ Column {
                 readonly property string actionName: {
                     if (modelData === "ring") return "Ring"
                     if (modelData === "clipboard") return "Clipboard"
-                    if (modelData === "file") return "File"
+                    if (modelData === "file") return (root.service && root.service.fileBusy) ? "Cancel File" : "File"
                     if (modelData === "sms") return "SMS"
                     if (modelData === "ping") return "Ping"
                     if (modelData === "text") return "Text"
@@ -48,7 +48,7 @@ Column {
                 readonly property string actionTooltip: {
                     if (modelData === "ring") return "Ring device to locate it"
                     if (modelData === "clipboard") return "Send clipboard to device"
-                    if (modelData === "file") return "Choose and send file to device"
+                    if (modelData === "file") return (root.service && root.service.fileBusy) ? "Click to cancel active file transfer" : "Choose and send file to device"
                     if (modelData === "sms") return "Open SMS conversation app"
                     if (modelData === "ping") return "Send ping notification"
                     if (modelData === "text") return "Share text or link with device"
@@ -57,7 +57,7 @@ Column {
                 readonly property string actionIcon: {
                     if (modelData === "ring") return "󰂚"
                     if (modelData === "clipboard") return "󰅌"
-                    if (modelData === "file") return "󰈔"
+                    if (modelData === "file") return (root.service && root.service.fileBusy) ? "󰅖" : "󰈔"
                     if (modelData === "sms") return "󰍦"
                     if (modelData === "ping") return "󰵅"
                     if (modelData === "text") return "󰌹"
@@ -74,11 +74,11 @@ Column {
                 implicitHeight: actionRowContent.implicitHeight + Style.space(8)
                 radius: Style.cornerRadius
                 hasCursor: panel.cursorActive && panel.focusSection === "actions" && panel.actionSelectedIndex === index
-                current: (modelData === "ping" && panel.activeComposer === "ping") || (modelData === "text" && panel.activeComposer === "text")
+                current: (modelData === "ping" && panel.activeComposer === "ping") || (modelData === "text" && panel.activeComposer === "text") || (modelData === "file" && !!(root.service && root.service.fileBusy))
                 foreground: root.foreground
                 fill: Style.hoverFillFor(root.foreground, Color.accent)
                 currentFill: Style.selectedFillFor(root.foreground, Color.accent)
-                enabled: !root.service || (root.service.actionState !== "running" && !root.service.fileBusy)
+                enabled: !root.service || (modelData === "file" ? true : (root.service.actionState !== "running"))
 
                 MouseArea {
                     id: actionMouseArea

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -13,7 +14,7 @@ BarWidget {
         ? bar.shell.serviceFor("omaconnect") : null
     readonly property var device: service ? service.selectedDevice : null
     readonly property string deviceName: device && typeof device.name === "string" ? device.name : "KDE Connect"
-    readonly property bool hasBattery: !!(device && device.reachable && device.battery >= 0)
+    readonly property bool hasBattery: !!(device && device.reachable && device.capabilities && device.capabilities.battery && device.battery >= 0)
     readonly property bool showBarBattery: !!(root.settings && root.settings.showBarBattery && root.hasBattery)
     readonly property Item button: buttonItem
 
@@ -77,6 +78,17 @@ BarWidget {
         onPressed: function(b) {
             root.togglePanel()
         }
+    }
+
+    IpcHandler {
+        target: "omaconnect"
+
+        function open(): void { root.open() }
+        function close(): void { root.close() }
+        function show(): void { root.open() }
+        function hide(): void { root.close() }
+        function toggle(): void { root.togglePanel() }
+        function refresh(): void { if (root.service) root.service.refresh(true) }
     }
 
     Loader {

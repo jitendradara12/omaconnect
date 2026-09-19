@@ -17,6 +17,7 @@ Column {
     readonly property var service: panel ? panel.service : null
     readonly property color foreground: bar ? bar.foreground : "#ffffff"
     readonly property string fontFamily: bar ? bar.fontFamily : "sans-serif"
+    property alias addressInput: addressInput
     readonly property var filteredPeers: service ? service.filteredTailscalePeers(addressInput.text).slice(0, 8) : []
 
     readonly property bool hasCommandsAbove: !!(panel && panel.remoteCommandsVisible)
@@ -34,7 +35,7 @@ Column {
         CursorSurface {
             width: Math.max(1, parent.width - (panel.networkExpanded ? refreshNetBtn.implicitWidth + Style.space(6) : 0))
             implicitHeight: headerRow.implicitHeight + Style.space(6)
-            hasCursor: panel.cursorActive && panel.focusSection === "network" && !panel.networkExpanded
+            hasCursor: panel.cursorActive && panel.focusSection === "network" && (!panel.networkExpanded || panel.networkSelectedIndex === 0)
             radius: Style.cornerRadius
             foreground: root.foreground
             fill: Style.hoverFillFor(root.foreground, Color.accent)
@@ -46,6 +47,7 @@ Column {
                 onEntered: {
                     panel.cursorActive = true
                     panel.focusSection = "network"
+                    panel.networkSelectedIndex = 0
                 }
                 onClicked: panel.toggleNetworkExpanded()
             }
@@ -74,10 +76,11 @@ Column {
                 Text {
                     visible: !panel.networkExpanded && !!(root.service && root.service.tailscaleInstalled)
                     text: {
+                        if (!root.service) return ""
                         if (root.service.tailscaleLoading) return "Checking…"
-                        return root.service.tailscaleStatus
+                        return root.service.tailscaleStatus || ""
                     }
-                    color: root.service && root.service.tailscaleRunning ? Color.accent : Qt.darker(root.foreground, 1.4)
+                    color: (root.service && root.service.tailscaleRunning) ? Color.accent : Qt.darker(root.foreground, 1.4)
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
                     anchors.verticalCenter: parent.verticalCenter
@@ -92,7 +95,7 @@ Column {
             tooltipText: "Refresh Tailscale peers"
             foreground: root.foreground
             fontFamily: root.fontFamily
-            enabled: !!root.service && !root.service.tailscaleLoading
+            enabled: !!(root.service && !root.service.tailscaleLoading)
             onClicked: if (root.service) root.service.refreshTailscale()
         }
     }
@@ -155,6 +158,10 @@ Column {
                 onAccepted: {
                     if (root.service && root.service.addCustomAddress(text)) text = ""
                 }
+                Keys.onEscapePressed: {
+                    focus = false
+                    if (root.panel && root.panel.focusTarget) root.panel.focusTarget.forceActiveFocus()
+                }
             }
 
             Button {
@@ -176,10 +183,27 @@ Column {
 
             Repeater {
                 model: root.filteredPeers
-                delegate: Item {
+                delegate: CursorSurface {
                     required property var modelData
+                    required property int index
                     width: parent ? parent.width : 0
                     implicitHeight: peerRow.implicitHeight + Style.space(4)
+                    hasCursor: panel.cursorActive && panel.focusSection === "network" && panel.networkExpanded && panel.networkSelectedIndex === (1 + index)
+                    radius: Style.cornerRadius
+                    foreground: root.foreground
+                    fill: Style.hoverFillFor(root.foreground, Color.accent)
+                    currentFill: Style.selectedFillFor(root.foreground, Color.accent)
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onEntered: {
+                            panel.cursorActive = true
+                            panel.focusSection = "network"
+                            panel.networkSelectedIndex = 1 + index
+                        }
+                        onClicked: if (root.service && modelData) root.service.addCustomAddress(modelData.address)
+                    }
 
                     Row {
                         id: peerRow
@@ -205,11 +229,11 @@ Column {
 
                         Button {
                             id: peerButton
-                            text: (root.service && modelData && root.service.customAddresses.indexOf(modelData.address) !== -1) ? "Saved" : "Add"
+                            text: (root.service && modelData && root.service.customAddresses && root.service.customAddresses.indexOf(modelData.address) !== -1) ? "Saved" : "Add"
                             foreground: root.foreground
                             fontFamily: root.fontFamily
                             fontSize: Style.font.bodySmall
-                            enabled: !!root.service && root.service.customAddressesReady && !root.service.addressBusy && text !== "Saved"
+                            enabled: !!(root.service && root.service.customAddressesReady && !root.service.addressBusy && peerButton.text !== "Saved")
                             onClicked: if (root.service && modelData) root.service.addCustomAddress(modelData.address)
                         }
                     }
@@ -218,7 +242,7 @@ Column {
         }
 
         Column {
-            visible: !!(root.service && root.service.customAddresses.length > 0)
+            visible: !!(root.service && root.service.customAddresses && root.service.customAddresses.length > 0)
             width: parent.width
             spacing: Style.space(4)
 
@@ -232,29 +256,52 @@ Column {
 
             Repeater {
                 model: root.service ? root.service.customAddresses : []
-                delegate: Row {
+                delegate: CursorSurface {
                     required property string modelData
+                    required property int index
                     width: parent ? parent.width : 0
-                    spacing: Style.space(6)
+                    implicitHeight: savedRow.implicitHeight + Style.space(4)
+                    hasCursor: panel.cursorActive && panel.focusSection === "network" && panel.networkExpanded && panel.networkSelectedIndex === (1 + ((root.service && root.service.tailscaleRunning) ? root.filteredPeers.length : 0) + index)
+                    radius: Style.cornerRadius
+                    foreground: root.foreground
+                    fill: Style.hoverFillFor(root.foreground, Color.accent)
+                    currentFill: Style.selectedFillFor(root.foreground, Color.accent)
 
-                    Text {
-                        width: Math.max(1, parent.width - removeButton.implicitWidth - Style.space(6))
-                        text: modelData
-                        color: root.foreground
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                        elide: Text.ElideRight
-                        anchors.verticalCenter: parent.verticalCenter
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onEntered: {
+                            panel.cursorActive = true
+                            panel.focusSection = "network"
+                            panel.networkSelectedIndex = 1 + ((root.service && root.service.tailscaleRunning) ? root.filteredPeers.length : 0) + index
+                        }
+                        onClicked: if (root.service) root.service.removeCustomAddress(modelData)
                     }
 
-                    Button {
-                        id: removeButton
-                        text: "Remove"
-                        foreground: root.foreground
-                        fontFamily: root.fontFamily
-                        fontSize: Style.font.bodySmall
-                        enabled: !!root.service && root.service.customAddressesReady && !root.service.addressBusy
-                        onClicked: if (root.service) root.service.removeCustomAddress(modelData)
+                    Row {
+                        id: savedRow
+                        width: parent.width
+                        spacing: Style.space(6)
+
+                        Text {
+                            width: Math.max(1, parent.width - removeButton.implicitWidth - Style.space(6))
+                            text: modelData
+                            color: root.foreground
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.bodySmall
+                            elide: Text.ElideRight
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        Button {
+                            id: removeButton
+                            text: "Remove"
+                            foreground: root.foreground
+                            fontFamily: root.fontFamily
+                            fontSize: Style.font.bodySmall
+                            enabled: !!(root.service && root.service.customAddressesReady && !root.service.addressBusy)
+                            onClicked: if (root.service) root.service.removeCustomAddress(modelData)
+                        }
                     }
                 }
             }

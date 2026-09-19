@@ -28,8 +28,8 @@ EOF
     fi
 
     echo "Applying UFW firewall rules with root privileges..."
-    if sudo ufw allow 1714:1764/tcp comment 'KDE Connect' && \
-       sudo ufw allow 1714:1764/udp comment 'KDE Connect' && \
+    if { sudo ufw status 2>/dev/null | grep -q '1714:1764/tcp' || sudo ufw allow 1714:1764/tcp comment 'KDE Connect'; } && \
+       { sudo ufw status 2>/dev/null | grep -q '1714:1764/udp' || sudo ufw allow 1714:1764/udp comment 'KDE Connect'; } && \
        sudo ufw reload; then
         echo ""
         echo "Firewall rules applied successfully."

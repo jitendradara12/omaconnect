@@ -5,9 +5,11 @@ set -Eeuo pipefail
 # and a non-zero exit for missing dependencies, D-Bus errors, or bad replies.
 base=/modules/kdeconnect
 
-for command in gdbus sed grep tr kdeconnect-cli; do
+for command in gdbus sed grep tr; do
     command -v "$command" >/dev/null 2>&1 || exit 127
 done
+
+# kdeconnect-cli is optional: daemon discovery works without it; --refresh is best-effort.
 
 is_daemon_running() {
     gdbus call --session --dest org.freedesktop.DBus \
@@ -54,7 +56,7 @@ sanitize_field() {
 
 value() {
     # gdbus quotes strings as <'value'> and scalar values as <value>.
-    printf '%s' "$1" | sed -E "s/^\((true|false),\)$/\1/; s/^\(<('([^']|\\\\')*'|[^>]+)>.*$/\1/; s/^<'(.*)'>,?$/\1/; s/^<([^>]*)>,?$/\1/; s/^'(.*)'$/\1/"
+    printf '%s' "$1" | sed -E "s/^\((true|false),\)$/\1/; s/^\(<[[:space:]]*'(.*)',[[:space:]]*>,\)$/\1/; s/^\(<('([^']|\\\\')*'|[^>]+)>.*$/\1/; s/^<'(.*)'>,?$/\1/; s/^<([^>]*)>,?$/\1/; s/^'(.*)'$/\1/; s/^'(.*)',$/\1/"
 }
 
 ids=$(gdbus call --session --dest org.kde.kdeconnect --object-path "$base" \
@@ -77,20 +79,6 @@ else
     printf 'CUSTOM_ADDRESSES_UNAVAILABLE\n'
 fi
 
-is_address_reachable() {
-    local addr=$1
-    [[ -n "$addr" ]] || return 1
-    # Pass the address as data; interpolating it into the shell program allows
-    # a malformed or compromised D-Bus response to inject shell syntax.
-    if timeout 0.4 bash -c '>/dev/tcp/$1/1716' -- "$addr" 2>/dev/null; then
-        return 0
-    fi
-    if ping -c 1 -W 1 "$addr" >/dev/null 2>&1; then
-        return 0
-    fi
-    return 1
-}
-
 while IFS= read -r entry; do
     [[ -n "$entry" ]] || continue
     path="$entry"
@@ -100,26 +88,6 @@ while IFS= read -r entry; do
     type=$(value "$(property "$path" org.kde.kdeconnect.device type)") || continue
     paired=$(value "$(property "$path" org.kde.kdeconnect.device isPaired)") || continue
     reachable=$(value "$(property "$path" org.kde.kdeconnect.device isReachable)") || continue
-    if [[ "$reachable" == "true" ]]; then
-        providers_raw=$(property "$path" org.kde.kdeconnect.device activeProviderNames 2>/dev/null) || providers_raw=""
-        addrs_raw=$(property "$path" org.kde.kdeconnect.device reachableAddresses 2>/dev/null) || addrs_raw=""
-        addrs=$(printf '%s' "$addrs_raw" | sed -E 's/.*\[//; s/\].*//' | tr ',' '\n' | sed -nE "s/^[[:space:]]*['\"]?([^'\"]+)['\"]?[[:space:]]*$/\1/p")
-        if [[ -n "$addrs" || "$providers_raw" == *"LAN"* ]]; then
-            has_alive_addr=false
-            if [[ -n "$addrs" ]]; then
-                while IFS= read -r addr; do
-                    [[ -n "$addr" ]] || continue
-                    if is_address_reachable "$addr"; then
-                        has_alive_addr=true
-                        break
-                    fi
-                done <<< "$addrs"
-            fi
-            if [[ "$has_alive_addr" != true ]]; then
-                reachable=false
-            fi
-        fi
-    fi
     pair_requested=$(value "$(property "$path" org.kde.kdeconnect.device isPairRequested 2>/dev/null)") || pair_requested=false
     pair_requested_by_peer=$(value "$(property "$path" org.kde.kdeconnect.device isPairRequestedByPeer 2>/dev/null)") || pair_requested_by_peer=false
     verification_key=$(value "$(property "$path" org.kde.kdeconnect.device verificationKey 2>/dev/null)") || verification_key=""
