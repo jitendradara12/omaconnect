@@ -1154,6 +1154,17 @@ class StateTests(unittest.TestCase):
   def test_no_privacy_product_claims_or_ui_processes(self):
     self.assertNotIn("Process {", (ROOT / "BarWidget.qml").read_text())
 
+  def test_media_status_update_references_process_ids_directly(self):
+    import re
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    # QML child ids are in component scope but are NOT properties of the root
+    # item: `root.<processId>` resolves to undefined, so reading `.running`
+    # off it throws and the surrounding try/catch wipes mediaState to empty.
+    # Process ids must be referenced bare, like every other Process use here.
+    bad_refs = re.findall(r"root\.\w*Process\b", controller_source)
+    self.assertEqual(bad_refs, [], f"root-qualified Process id refs: {bad_refs}")
+    self.assertIn("mediaActionProcess.running", controller_source)
+
 
   def test_shell_script_is_not_needed_for_file_sharing(self):
     self.assertFalse((ROOT / "scripts" / "share_file.sh").exists())

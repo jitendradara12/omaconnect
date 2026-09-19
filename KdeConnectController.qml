@@ -1321,7 +1321,7 @@ Item {
                         root.mediaSelectPlayer(targetDeviceId, activePlayer)
                     }
                     root.mediaState = {
-                        isPlaying: (root.mediaActionProcess.running && root.mediaState) ? root.mediaState.isPlaying : (parsed.isPlaying === true),
+                        isPlaying: (mediaActionProcess.running && root.mediaState) ? root.mediaState.isPlaying : (parsed.isPlaying === true),
                         title: String(parsed.title || ""),
                         artist: String(parsed.artist || ""),
                         album: String(parsed.album || ""),
