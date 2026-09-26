@@ -1058,6 +1058,7 @@ Item {
         id: monitorStabilityTimer
         interval: 10000
         repeat: false
+        // ponytail: sustained uptime resets backoff; immediate reset would pin crash loops at 1s
         onTriggered: monitorRestartCount = 0
     }
 
