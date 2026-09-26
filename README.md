@@ -5,7 +5,7 @@ Control phones and connected devices from the Omarchy bar using KDE Connect.
 ![OmaConnect panel](preview.png)
 
 ## Install
-
+Just install the plugin with this command. It will handle dependencies and firewall in GUI.
 ```bash
 omarchy plugin add https://github.com/jitendradara12/omaconnect.git --enable --yes
 ```
@@ -46,7 +46,7 @@ Configure OmaConnect in Omarchy bar widget settings.
 
 ## Shortcuts
 
-Add to `~/.config/omarchy/shortcuts.lua`:
+(Optional) Add to `~/.config/omarchy/shortcuts.lua`:
 
 ```lua
 o.bind("SUPER + SHIFT + C", "Toggle OmaConnect", "omarchy-shell shell toggle omaconnect")
