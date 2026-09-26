@@ -196,6 +196,67 @@ Panel {
         }
     }
 
+    // NOTE: PanelKeyCatcher consumes h/j/k/l and the arrow keys into
+    // moveRequested(dx, dy) -- they never reach onTextKey. All directional
+    // navigation must live in these move functions, called from
+    // onMoveRequested below. onTextKey keeps delegating here only so
+    // Shift+letter (e.g. "J", which arrives as text) behaves the same.
+    function moveDown() {
+        if (focusSection === "devices") {
+            var devList = (service && service.devices) ? service.devices : []
+            if (devList.length > 0 && selectedIndex < devList.length - 1) select(1)
+            else navigateNextSection()
+        } else if (focusSection === "commands" && commandsExpanded) {
+            var cmdList = (service && service.remoteCommands) ? service.remoteCommands : []
+            if (cmdList.length > 0 && commandSelectedIndex < cmdList.length - 1) selectCommand(1)
+            else navigateNextSection()
+        } else if (focusSection === "network" && networkExpanded) {
+            if (networkSelectedIndex < getNetworkItemCount() - 1) networkSelectedIndex++
+            else navigateNextSection()
+        } else {
+            navigateNextSection()
+        }
+    }
+
+    function moveUp() {
+        if (focusSection === "devices") {
+            if (selectedIndex > 0) select(-1)
+            else navigatePrevSection()
+        } else if (focusSection === "commands" && commandsExpanded) {
+            if (commandSelectedIndex > 0) selectCommand(-1)
+            else navigatePrevSection()
+        } else if (focusSection === "network" && networkExpanded) {
+            if (networkSelectedIndex > 0) networkSelectedIndex--
+            else navigatePrevSection()
+        } else {
+            navigatePrevSection()
+        }
+    }
+
+    function moveRight() {
+        if (focusSection === "actions") {
+            if (actionSelectedIndex < availableActions.length - 1) actionSelectedIndex++
+            else navigateNextSection()
+        } else if (focusSection === "media") {
+            if (mediaExpanded && mediaControlIndex < 2) mediaControlIndex++
+            else navigateNextSection()
+        } else {
+            navigateNextSection()
+        }
+    }
+
+    function moveLeft() {
+        if (focusSection === "actions") {
+            if (actionSelectedIndex > 0) actionSelectedIndex--
+            else navigatePrevSection()
+        } else if (focusSection === "media") {
+            if (mediaExpanded && mediaControlIndex > 0) mediaControlIndex--
+            else navigatePrevSection()
+        } else {
+            navigatePrevSection()
+        }
+    }
+
     function triggerAction(actionId) {
         if (!service || !device) return
         if (actionId === "ring") service.ringDevice(device.id)
@@ -494,7 +555,15 @@ Panel {
 
             blocked: root.activeComposer !== "none" || !!(composerSection && ((composerSection.pingInput && composerSection.pingInput.activeFocus) || (composerSection.textInput && composerSection.textInput.activeFocus))) || !!(networkSection && networkSection.addressInput && networkSection.addressInput.activeFocus)
             onMoveRequested: function(dx, dy) {
-                if (!root.cursorActive) root.cursorActive = true
+                if (root.activeComposer !== "none") return
+                if (!root.cursorActive) {
+                    root.cursorActive = true
+                    return
+                }
+                if (dy > 0) root.moveDown()
+                else if (dy < 0) root.moveUp()
+                else if (dx > 0) root.moveRight()
+                else if (dx < 0) root.moveLeft()
             }
             onActivateRequested: root.activate()
             onCloseRequested: {
@@ -514,53 +583,13 @@ Panel {
                 if (key === "r" && root.service) {
                     root.service.refresh(true)
                 } else if (key === "j" || key === "down") {
-                    if (root.focusSection === "devices") {
-                        var devList = (root.service && root.service.devices) ? root.service.devices : []
-                        if (devList.length > 0 && root.selectedIndex < devList.length - 1) root.select(1)
-                        else root.navigateNextSection()
-                    } else if (root.focusSection === "commands" && root.commandsExpanded) {
-                        var cmdList = (root.service && root.service.remoteCommands) ? root.service.remoteCommands : []
-                        if (cmdList.length > 0 && root.commandSelectedIndex < cmdList.length - 1) root.selectCommand(1)
-                        else root.navigateNextSection()
-                    } else if (root.focusSection === "network" && root.networkExpanded) {
-                        if (root.networkSelectedIndex < root.getNetworkItemCount() - 1) root.networkSelectedIndex++
-                        else root.navigateNextSection()
-                    } else {
-                        root.navigateNextSection()
-                    }
+                    root.moveDown()
                 } else if (key === "k" || key === "up") {
-                    if (root.focusSection === "devices") {
-                        if (root.selectedIndex > 0) root.select(-1)
-                        else root.navigatePrevSection()
-                    } else if (root.focusSection === "commands" && root.commandsExpanded) {
-                        if (root.commandSelectedIndex > 0) root.selectCommand(-1)
-                        else root.navigatePrevSection()
-                    } else if (root.focusSection === "network" && root.networkExpanded) {
-                        if (root.networkSelectedIndex > 0) root.networkSelectedIndex--
-                        else root.navigatePrevSection()
-                    } else {
-                        root.navigatePrevSection()
-                    }
+                    root.moveUp()
                 } else if (key === "l" || key === "right") {
-                    if (root.focusSection === "actions") {
-                        if (root.actionSelectedIndex < root.availableActions.length - 1) root.actionSelectedIndex++
-                        else root.navigateNextSection()
-                    } else if (root.focusSection === "media") {
-                        if (root.mediaExpanded && root.mediaControlIndex < 2) root.mediaControlIndex++
-                        else root.navigateNextSection()
-                    } else {
-                        root.navigateNextSection()
-                    }
+                    root.moveRight()
                 } else if (key === "h" || key === "left") {
-                    if (root.focusSection === "actions") {
-                        if (root.actionSelectedIndex > 0) root.actionSelectedIndex--
-                        else root.navigatePrevSection()
-                    } else if (root.focusSection === "media") {
-                        if (root.mediaExpanded && root.mediaControlIndex > 0) root.mediaControlIndex--
-                        else root.navigatePrevSection()
-                    } else {
-                        root.navigatePrevSection()
-                    }
+                    root.moveLeft()
                 } else if (key === "p" && root.focusSection === "devices") {
                     var listP = root.service ? root.service.devices : []
                     var devP = listP[root.selectedIndex]
