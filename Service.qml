@@ -1,4 +1,5 @@
 import QtQuick
+import "bridge" as OmaconnectBridge
 
 Item {
     id: root
@@ -6,6 +7,17 @@ Item {
     property var shell: null
     property var manifest: null
     property var pluginRegistry: null
+
+    Component.onCompleted: {
+        // Publish for widgets hosted by replacement bars, whose `bar.shell`
+        // facade cannot resolve plugin services. See bridge/Bridge.qml;
+        // the host facade stays the primary path.
+        OmaconnectBridge.Bridge.service = root
+    }
+
+    // Unpublish so a widget falling back to the bridge never binds to a
+    // dying instance.
+    Component.onDestruction: if (OmaconnectBridge.Bridge.service === root) OmaconnectBridge.Bridge.service = null
 
     KdeConnectController { id: controller }
 

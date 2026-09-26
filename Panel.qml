@@ -6,6 +6,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "./components"
+import "bridge" as OmaconnectBridge
 
 Panel {
     id: root
@@ -18,7 +19,10 @@ Panel {
     readonly property var barIdentity: hostWidget || root
     readonly property Item focusTarget: keyCatcher
 
-    readonly property var service: hostWidget && hostWidget.service ? hostWidget.service : (bar && bar.shell && typeof bar.shell.serviceFor === "function" ? bar.shell.serviceFor("omaconnect") : null)
+    // hostWidget.service already carries the bridge fallback (see
+    // BarWidget.qml); the bridge here covers standalone instantiation with
+    // no host widget. See bridge/Bridge.qml.
+    readonly property var service: hostWidget && hostWidget.service ? hostWidget.service : (bar && bar.shell && typeof bar.shell.serviceFor === "function" ? (bar.shell.serviceFor("omaconnect") || OmaconnectBridge.Bridge.service) : OmaconnectBridge.Bridge.service)
     readonly property var device: service ? service.selectedDevice : null
     readonly property string deviceName: device && typeof device.name === "string" ? device.name : "KDE Connect"
     readonly property var incomingRequest: service ? service.incomingPairRequest : null

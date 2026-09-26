@@ -5,13 +5,23 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "bridge" as OmaconnectBridge
 
 BarWidget {
     id: root
     moduleName: "omaconnect"
 
-    readonly property var service: bar && bar.shell && typeof bar.shell.serviceFor === "function"
-        ? bar.shell.serviceFor("omaconnect") : null
+    // Primary path: the bar host's scoped facade (service-capable under the
+    // first-party bar). Fallback: the engine-wide bridge singleton -- under
+    // replacement bars the facade's serviceFor() is a deliberate null stub,
+    // so widgets they host would otherwise never see the service. The
+    // binding re-evaluates on its own when the service publishes (or is
+    // torn down). See bridge/Bridge.qml.
+    readonly property var service: {
+        var viaHost = bar && bar.shell && typeof bar.shell.serviceFor === "function"
+            ? bar.shell.serviceFor("omaconnect") : null
+        return viaHost || OmaconnectBridge.Bridge.service
+    }
     readonly property var device: service ? service.selectedDevice : null
     readonly property string deviceName: device && typeof device.name === "string" ? device.name : "KDE Connect"
     readonly property bool hasBattery: !!(device && device.reachable && device.capabilities && device.capabilities.battery && device.battery >= 0)
