@@ -27,6 +27,14 @@ BarWidget {
     readonly property bool hasBattery: !!(device && device.reachable && device.capabilities && device.capabilities.battery && device.battery >= 0)
     readonly property bool showBarBattery: !!(root.settings && root.settings.showBarBattery && root.hasBattery)
     readonly property Item button: buttonItem
+    readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+    readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
+
+    implicitWidth: buttonItem.implicitWidth
+    implicitHeight: barSize
+
+    onBarChanged: injectPanel()
+    onSettingsChanged: injectPanel()
 
     function injectPanel() {
         var target = panelLoader.item
@@ -45,8 +53,6 @@ BarWidget {
         toggle()
     }
 
-    readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
-
     function open() {
         if (panelLoader.item && panelLoader.item.open) panelLoader.item.open()
     }
@@ -55,17 +61,9 @@ BarWidget {
         if (panelLoader.item && panelLoader.item.close) panelLoader.item.close()
     }
 
-    readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
-
     function closeForPopoutSwitch() {
         if (panelLoader.item && panelLoader.item.closeForPopoutSwitch) panelLoader.item.closeForPopoutSwitch()
     }
-
-    implicitWidth: buttonItem.implicitWidth
-    implicitHeight: barSize
-
-    onBarChanged: injectPanel()
-    onSettingsChanged: injectPanel()
 
     BarIconButton {
         id: buttonItem

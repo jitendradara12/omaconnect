@@ -3,6 +3,7 @@ import "bridge" as OmaconnectBridge
 
 Item {
     id: root
+
     property string omarchyPath: ""
     property var shell: null
     property var manifest: null
@@ -17,9 +18,15 @@ Item {
 
     // Unpublish so a widget falling back to the bridge never binds to a
     // dying instance.
-    Component.onDestruction: if (OmaconnectBridge.Bridge.service === root) OmaconnectBridge.Bridge.service = null
+    Component.onDestruction: {
+        if (OmaconnectBridge.Bridge.service === root) {
+            OmaconnectBridge.Bridge.service = null
+        }
+    }
 
-    KdeConnectController { id: controller }
+    KdeConnectController {
+        id: controller
+    }
 
     property alias daemonAvailable: controller.daemonAvailable
     property alias sessionBusAvailable: controller.sessionBusAvailable
@@ -53,43 +60,159 @@ Item {
     property alias mediaState: controller.mediaState
     property alias mediaLoading: controller.mediaLoading
 
-    function refresh(forceNetwork) { controller.refresh(forceNetwork) }
-    function selectDevice(id) { controller.selectDevice(id) }
-    function clearActionState() { controller.clearActionState() }
-    function setPendingPairing(id, state) { controller.setPendingPairing(id, state) }
-    function pingDevice(id, text) { return controller.pingDevice(id, text) }
-    function shareText(id, text) { return controller.shareText(id, text) }
-    function fetchRemoteCommands(id) { return controller.fetchRemoteCommands(id) }
-    function executeRemoteCommand(id, key) { return controller.executeRemoteCommand(id, key) }
-    function pairDevice(id) { return controller.pairDevice(id) }
-    function unpairDevice(id) { return controller.unpairDevice(id) }
-    function acceptPairing(id) { return controller.acceptPairing(id) }
-    function rejectPairing(id) { return controller.rejectPairing(id) }
-    function ringDevice(id) { return controller.ringDevice(id) }
-    function sendClipboard(id) { return controller.sendClipboard(id) }
-    function startFileSelection(id) { return controller.startFileSelection(id) }
-    function cancelFileSelection() { return controller.cancelFileSelection() }
-    function cancelFileTransfer() { return controller.cancelFileTransfer() }
-    function sendFile(id, path) { return controller.sendFile(id, path) }
-    function openSmsApp(id) { return controller.openSmsApp(id) }
-    function openKdeConnectApp() { return controller.openKdeConnectApp() }
-    function configureFirewall() { controller.configureFirewall() }
-    function installDependencies() { controller.installDependencies() }
-    function refreshTailscale() { controller.refreshTailscale() }
-    function addCustomAddress(address) { return controller.addCustomAddress(address) }
-    function removeCustomAddress(address) { return controller.removeCustomAddress(address) }
-    function filteredTailscalePeers(query) { return controller.filteredTailscalePeers(query) }
-    function addressError(address) { return controller.addressError(address) }
-    function formatVerificationKey(key) { return controller.formatVerificationKey(key) }
-    function deviceOverviewStatus(device) { return controller.deviceOverviewStatus(device) }
-    function deviceTypeIcon(type) { return controller.deviceTypeIcon(type) }
-    function deviceBatteryText(device, showBattery, showNetwork) { return controller.deviceBatteryText(device, showBattery, showNetwork) }
-    function deviceBatteryIcon(device) { return controller.deviceBatteryIcon(device) }
-    function deviceNetworkIcon(device) { return controller.deviceNetworkIcon(device) }
-    function fetchMediaStatus(id) { return controller.fetchMediaStatus(id) }
-    function requestPlayerList(id) { return controller.requestPlayerList(id) }
-    function mediaPlayPause(id) { return controller.mediaPlayPause(id) }
-    function mediaNext(id) { return controller.mediaNext(id) }
-    function mediaPrevious(id) { return controller.mediaPrevious(id) }
-    function mediaSelectPlayer(id, playerName) { return controller.mediaSelectPlayer(id, playerName) }
+    function refresh(forceNetwork) {
+        controller.refresh(forceNetwork)
+    }
+
+    function selectDevice(id) {
+        controller.selectDevice(id)
+    }
+
+    function clearActionState() {
+        controller.clearActionState()
+    }
+
+    function setPendingPairing(id, state) {
+        controller.setPendingPairing(id, state)
+    }
+
+    function pingDevice(id, text) {
+        return controller.pingDevice(id, text)
+    }
+
+    function shareText(id, text) {
+        return controller.shareText(id, text)
+    }
+
+    function fetchRemoteCommands(id) {
+        return controller.fetchRemoteCommands(id)
+    }
+
+    function executeRemoteCommand(id, key) {
+        return controller.executeRemoteCommand(id, key)
+    }
+
+    function pairDevice(id) {
+        return controller.pairDevice(id)
+    }
+
+    function unpairDevice(id) {
+        return controller.unpairDevice(id)
+    }
+
+    function acceptPairing(id) {
+        return controller.acceptPairing(id)
+    }
+
+    function rejectPairing(id) {
+        return controller.rejectPairing(id)
+    }
+
+    function ringDevice(id) {
+        return controller.ringDevice(id)
+    }
+
+    function sendClipboard(id) {
+        return controller.sendClipboard(id)
+    }
+
+    function startFileSelection(id) {
+        return controller.startFileSelection(id)
+    }
+
+    function cancelFileSelection() {
+        return controller.cancelFileSelection()
+    }
+
+    function cancelFileTransfer() {
+        return controller.cancelFileTransfer()
+    }
+
+    function sendFile(id, path) {
+        return controller.sendFile(id, path)
+    }
+
+    function openSmsApp(id) {
+        return controller.openSmsApp(id)
+    }
+
+    function openKdeConnectApp() {
+        return controller.openKdeConnectApp()
+    }
+
+    function configureFirewall() {
+        controller.configureFirewall()
+    }
+
+    function installDependencies() {
+        controller.installDependencies()
+    }
+
+    function refreshTailscale() {
+        controller.refreshTailscale()
+    }
+
+    function addCustomAddress(address) {
+        return controller.addCustomAddress(address)
+    }
+
+    function removeCustomAddress(address) {
+        return controller.removeCustomAddress(address)
+    }
+
+    function filteredTailscalePeers(query) {
+        return controller.filteredTailscalePeers(query)
+    }
+
+    function addressError(address) {
+        return controller.addressError(address)
+    }
+
+    function formatVerificationKey(key) {
+        return controller.formatVerificationKey(key)
+    }
+
+    function deviceOverviewStatus(device) {
+        return controller.deviceOverviewStatus(device)
+    }
+
+    function deviceTypeIcon(type) {
+        return controller.deviceTypeIcon(type)
+    }
+
+    function deviceBatteryText(device, showBattery, showNetwork) {
+        return controller.deviceBatteryText(device, showBattery, showNetwork)
+    }
+
+    function deviceBatteryIcon(device) {
+        return controller.deviceBatteryIcon(device)
+    }
+
+    function deviceNetworkIcon(device) {
+        return controller.deviceNetworkIcon(device)
+    }
+
+    function fetchMediaStatus(id) {
+        return controller.fetchMediaStatus(id)
+    }
+
+    function requestPlayerList(id) {
+        return controller.requestPlayerList(id)
+    }
+
+    function mediaPlayPause(id) {
+        return controller.mediaPlayPause(id)
+    }
+
+    function mediaNext(id) {
+        return controller.mediaNext(id)
+    }
+
+    function mediaPrevious(id) {
+        return controller.mediaPrevious(id)
+    }
+
+    function mediaSelectPlayer(id, playerName) {
+        return controller.mediaSelectPlayer(id, playerName)
+    }
 }

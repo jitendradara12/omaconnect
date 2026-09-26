@@ -61,8 +61,8 @@ Column {
             spacing: Style.space(2)
 
             Row {
-                spacing: Style.space(6)
                 width: parent.width
+                spacing: Style.space(6)
 
                 Text {
                     visible: root.showDeviceTypeIcons && !!(root.device && root.device.type && root.device.type !== "unknown")
@@ -85,48 +85,48 @@ Column {
                 }
             }
 
+            Text {
+                width: parent.width
+                text: {
+                    if (!root.service) return "Service unavailable"
+                    if (root.service.discoveryState !== "ready") return root.service.discoveryMessage
+                    return root.service.deviceOverviewStatus(root.device)
+                }
+                color: (root.service && root.service.discoveryState === "ready" && root.device && root.device.reachable)
+                    ? root.foreground
+                    : Qt.darker(root.foreground, 1.4)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+            }
+
+            Row {
+                visible: !!(root.device && root.device.reachable && root.service && root.service.deviceBatteryText(root.device, root.showBattery, root.showNetwork) !== "")
+                spacing: Style.space(6)
+
                 Text {
-                    width: parent.width
-                    text: {
-                        if (!root.service) return "Service unavailable"
-                        if (root.service.discoveryState !== "ready") return root.service.discoveryMessage
-                        return root.service.deviceOverviewStatus(root.device)
-                    }
-                    color: (root.service && root.service.discoveryState === "ready" && root.device && root.device.reachable)
-                        ? root.foreground
-                        : Qt.darker(root.foreground, 1.4)
+                    text: root.service ? ((root.showBattery && root.device && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0) ? root.service.deviceBatteryIcon(root.device) : root.service.deviceNetworkIcon(root.device)) : ""
+                    color: (root.showBattery && root.device && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
+                        ? Color.urgent
+                        : ((root.device && (root.device.isCharging || root.device.charging)) ? Color.accent : root.foreground)
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    elide: Text.ElideRight
+                    font.pixelSize: Style.font.bodySmall
+                    anchors.verticalCenter: parent.verticalCenter
                 }
 
-                Row {
-                    visible: !!(root.device && root.device.reachable && root.service && root.service.deviceBatteryText(root.device, root.showBattery, root.showNetwork) !== "")
-                    spacing: Style.space(6)
-
-                    Text {
-                        text: root.service ? ((root.showBattery && root.device && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0) ? root.service.deviceBatteryIcon(root.device) : root.service.deviceNetworkIcon(root.device)) : ""
-                        color: (root.showBattery && root.device && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
-                            ? Color.urgent
-                            : ((root.device && (root.device.isCharging || root.device.charging)) ? Color.accent : root.foreground)
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-
-                    Text {
-                        text: root.service ? root.service.deviceBatteryText(root.device, root.showBattery, root.showNetwork) : ""
-                        color: (root.showBattery && root.device && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
-                            ? Color.urgent
-                            : ((root.device && (root.device.isCharging || root.device.charging)) ? Color.accent : root.foreground)
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                        font.bold: !!(root.showBattery && root.device && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
+                Text {
+                    text: root.service ? root.service.deviceBatteryText(root.device, root.showBattery, root.showNetwork) : ""
+                    color: (root.showBattery && root.device && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
+                        ? Color.urgent
+                        : ((root.device && (root.device.isCharging || root.device.charging)) ? Color.accent : root.foreground)
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: !!(root.showBattery && root.device && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
+                    anchors.verticalCenter: parent.verticalCenter
                 }
             }
         }
+    }
 
     Rectangle {
         id: statusBanner
@@ -249,9 +249,15 @@ Column {
         }
     }
 
-    PanelSeparator { foreground: root.foreground }
+    PanelSeparator {
+        foreground: root.foreground
+    }
 
-    PanelSectionHeader { text: "DEVICES"; foreground: root.foreground; fontFamily: root.fontFamily }
+    PanelSectionHeader {
+        text: "DEVICES"
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+    }
 
     ListView {
         id: deviceList
@@ -262,6 +268,7 @@ Column {
         interactive: contentHeight > height
         model: root.service ? root.service.devices : []
         currentIndex: panel.cursorActive ? panel.selectedIndex : -1
+
         delegate: CursorSurface {
             required property var modelData
             required property int index
@@ -276,6 +283,7 @@ Column {
             foreground: root.foreground
             fill: Style.hoverFillFor(root.foreground, Color.accent)
             currentFill: Style.selectedFillFor(root.foreground, Color.accent)
+
             MouseArea {
                 anchors.fill: parent
                 onClicked: {
@@ -286,10 +294,14 @@ Column {
                     panel.selectDevice(modelData.id)
                 }
             }
+
             Item {
                 id: row
-                anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: Style.space(8); anchors.rightMargin: Style.space(8)
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(8)
+                anchors.rightMargin: Style.space(8)
                 implicitHeight: Math.max(leftInfoRow.implicitHeight, rightActionItem.implicitHeight) + Style.space(4)
 
                 Row {
@@ -346,6 +358,7 @@ Column {
                     Row {
                         visible: !!modelData && isUnpairConfirming
                         spacing: Style.space(4)
+
                         Button {
                             text: "Confirm"
                             selected: true
@@ -354,6 +367,7 @@ Column {
                             fontSize: Style.font.bodySmall
                             onClicked: if (modelData) panel.confirmUnpair(modelData.id)
                         }
+
                         Button {
                             text: "Cancel"
                             foreground: root.foreground
@@ -377,6 +391,7 @@ Column {
                             }
                         }
                     }
+
                     Button {
                         visible: !!modelData && !isUnpairConfirming && devicePendingState === "removing"
                         enabled: false
@@ -389,6 +404,7 @@ Column {
                     Row {
                         visible: !isUnpairConfirming && !!modelData && !modelData.paired && modelData.pairRequestedByPeer
                         spacing: Style.space(4)
+
                         Button {
                             text: "Accept"
                             selected: true
@@ -398,6 +414,7 @@ Column {
                             enabled: devicePendingState === ""
                             onClicked: if (root.service && modelData) root.service.acceptPairing(modelData.id)
                         }
+
                         Button {
                             text: "Reject"
                             foreground: root.foreground

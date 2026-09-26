@@ -30,10 +30,6 @@ Panel {
     readonly property bool mediaPlayerVisible: !!(device && device.paired && device.reachable && device.capabilities && device.capabilities.media && (!getSetting || getSetting("showMediaPlayer", true)))
     readonly property bool networkVisible: (!getSetting || getSetting("showTailscale", true))
 
-    property string activeComposer: "none"
-    property string draftPing: ""
-    property string draftText: ""
-    property string composerError: ""
     property string focusSection: "devices"
     property int selectedIndex: 0
     property int actionSelectedIndex: 0
@@ -46,45 +42,10 @@ Panel {
     property int networkSelectedIndex: 0
     property string unpairConfirmingId: ""
 
-    function toggleMediaExpanded() {
-        mediaExpanded = !mediaExpanded
-        mediaControlIndex = 1
-        if (mediaExpanded && service && device && device.capabilities && device.capabilities.media) {
-            service.fetchMediaStatus(device.id)
-            if (typeof service.requestPlayerList === "function") service.requestPlayerList(device.id)
-        }
-    }
-
-    function open() {
-        if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
-        unpairConfirmingId = ""
-        root.controller.show()
-        if (service && device && device.paired && device.reachable && device.capabilities && device.capabilities.media) {
-            service.fetchMediaStatus(device.id)
-            if (typeof service.requestPlayerList === "function") service.requestPlayerList(device.id)
-        }
-    }
-    function close() {
-        if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
-        unpairConfirmingId = ""
-        root.controller.hide()
-    }
-    function toggle() { root.opened ? close() : open() }
-    function closeForPopoutSwitch() {
-        if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
-        unpairConfirmingId = ""
-        root.popoutSwitchClosing = true
-        root.close()
-        Qt.callLater(function() { root.popoutSwitchClosing = false })
-    }
-
-    function getSetting(key, defaultValue) {
-        if (!settings || typeof settings !== "object") return defaultValue
-        if (key in settings && settings[key] !== undefined && settings[key] !== null) {
-            return settings[key]
-        }
-        return defaultValue
-    }
+    property string activeComposer: "none"
+    property string draftPing: ""
+    property string draftText: ""
+    property string composerError: ""
 
     readonly property var availableActions: {
         if (!root.device || !root.device.paired || !root.device.reachable) return []
@@ -99,6 +60,15 @@ Panel {
         return res
     }
 
+    readonly property var visibleSections: {
+        var list = ["devices"]
+        if (availableActions.length > 0) list.push("actions")
+        if (mediaPlayerVisible) list.push("media")
+        if (remoteCommandsVisible) list.push("commands")
+        if (networkVisible) list.push("network")
+        return list
+    }
+
     onAvailableActionsChanged: {
         var acts = availableActions
         if (acts.length > 0) {
@@ -106,6 +76,42 @@ Panel {
         } else {
             actionSelectedIndex = 0
             if (focusSection === "actions") focusSection = "devices"
+        }
+    }
+
+    onVisibleSectionsChanged: {
+        if (visibleSections.indexOf(focusSection) === -1) {
+            focusSection = visibleSections.length > 0 ? visibleSections[0] : "devices"
+        }
+    }
+
+    onMediaPlayerVisibleChanged: {
+        if (!mediaPlayerVisible && focusSection === "media") {
+            focusSection = availableActions.length > 0 ? "actions" : "devices"
+        }
+    }
+
+    onRemoteCommandsVisibleChanged: {
+        if (!remoteCommandsVisible && focusSection === "commands") {
+            focusSection = availableActions.length > 0 ? "actions" : "devices"
+        }
+    }
+
+    onNetworkVisibleChanged: {
+        if (!networkVisible && focusSection === "network") {
+            focusSection = availableActions.length > 0 ? "actions" : "devices"
+        }
+    }
+
+    onDraftPingChanged: {
+        if (composerSection && composerSection.pingInput && composerSection.pingInput.text !== draftPing) {
+            composerSection.pingInput.text = draftPing
+        }
+    }
+
+    onDraftTextChanged: {
+        if (composerSection && composerSection.textInput && composerSection.textInput.text !== draftText) {
+            composerSection.textInput.text = draftText
         }
     }
 
@@ -121,19 +127,40 @@ Panel {
         }
     }
 
-    readonly property var visibleSections: {
-        var list = ["devices"]
-        if (availableActions.length > 0) list.push("actions")
-        if (mediaPlayerVisible) list.push("media")
-        if (remoteCommandsVisible) list.push("commands")
-        if (networkVisible) list.push("network")
-        return list
+    function open() {
+        if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
+        unpairConfirmingId = ""
+        root.controller.show()
+        if (service && device && device.paired && device.reachable && device.capabilities && device.capabilities.media) {
+            service.fetchMediaStatus(device.id)
+            if (typeof service.requestPlayerList === "function") service.requestPlayerList(device.id)
+        }
     }
 
-    onVisibleSectionsChanged: {
-        if (visibleSections.indexOf(focusSection) === -1) {
-            focusSection = visibleSections.length > 0 ? visibleSections[0] : "devices"
+    function close() {
+        if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
+        unpairConfirmingId = ""
+        root.controller.hide()
+    }
+
+    function toggle() {
+        root.opened ? close() : open()
+    }
+
+    function closeForPopoutSwitch() {
+        if (unpairConfirmingId) cancelUnpairConfirm(unpairConfirmingId)
+        unpairConfirmingId = ""
+        root.popoutSwitchClosing = true
+        root.close()
+        Qt.callLater(function() { root.popoutSwitchClosing = false })
+    }
+
+    function getSetting(key, defaultValue) {
+        if (!settings || typeof settings !== "object") return defaultValue
+        if (key in settings && settings[key] !== undefined && settings[key] !== null) {
+            return settings[key]
         }
+        return defaultValue
     }
 
     function getNetworkItemCount() {
@@ -169,9 +196,66 @@ Panel {
         }
     }
 
-    onMediaPlayerVisibleChanged: if (!mediaPlayerVisible && focusSection === "media") focusSection = availableActions.length > 0 ? "actions" : "devices"
-    onRemoteCommandsVisibleChanged: if (!remoteCommandsVisible && focusSection === "commands") focusSection = availableActions.length > 0 ? "actions" : "devices"
-    onNetworkVisibleChanged: if (!networkVisible && focusSection === "network") focusSection = availableActions.length > 0 ? "actions" : "devices"
+    // NOTE: PanelKeyCatcher consumes h/j/k/l and the arrow keys into
+    // moveRequested(dx, dy) -- they never reach onTextKey. All directional
+    // navigation must live in these move functions, called from
+    // onMoveRequested below. onTextKey keeps delegating here only so
+    // Shift+letter (e.g. "J", which arrives as text) behaves the same.
+    function moveDown() {
+        if (focusSection === "devices") {
+            var devList = (service && service.devices) ? service.devices : []
+            if (devList.length > 0 && selectedIndex < devList.length - 1) select(1)
+            else navigateNextSection()
+        } else if (focusSection === "commands" && commandsExpanded) {
+            var cmdList = (service && service.remoteCommands) ? service.remoteCommands : []
+            if (cmdList.length > 0 && commandSelectedIndex < cmdList.length - 1) selectCommand(1)
+            else navigateNextSection()
+        } else if (focusSection === "network" && networkExpanded) {
+            if (networkSelectedIndex < getNetworkItemCount() - 1) networkSelectedIndex++
+            else navigateNextSection()
+        } else {
+            navigateNextSection()
+        }
+    }
+
+    function moveUp() {
+        if (focusSection === "devices") {
+            if (selectedIndex > 0) select(-1)
+            else navigatePrevSection()
+        } else if (focusSection === "commands" && commandsExpanded) {
+            if (commandSelectedIndex > 0) selectCommand(-1)
+            else navigatePrevSection()
+        } else if (focusSection === "network" && networkExpanded) {
+            if (networkSelectedIndex > 0) networkSelectedIndex--
+            else navigatePrevSection()
+        } else {
+            navigatePrevSection()
+        }
+    }
+
+    function moveRight() {
+        if (focusSection === "actions") {
+            if (actionSelectedIndex < availableActions.length - 1) actionSelectedIndex++
+            else navigateNextSection()
+        } else if (focusSection === "media") {
+            if (mediaExpanded && mediaControlIndex < 2) mediaControlIndex++
+            else navigateNextSection()
+        } else {
+            navigateNextSection()
+        }
+    }
+
+    function moveLeft() {
+        if (focusSection === "actions") {
+            if (actionSelectedIndex > 0) actionSelectedIndex--
+            else navigatePrevSection()
+        } else if (focusSection === "media") {
+            if (mediaExpanded && mediaControlIndex > 0) mediaControlIndex--
+            else navigatePrevSection()
+        } else {
+            navigatePrevSection()
+        }
+    }
 
     function triggerAction(actionId) {
         if (!service || !device) return
@@ -192,8 +276,6 @@ Panel {
         }
     }
 
-
-
     function requestUnpairConfirm(id) {
         if (unpairConfirmingId && unpairConfirmingId !== id) cancelUnpairConfirm(unpairConfirmingId)
         unpairConfirmingId = id
@@ -203,6 +285,12 @@ Panel {
     function cancelUnpairConfirm(id) {
         if (!id || unpairConfirmingId === id) unpairConfirmingId = ""
         if (service && id && typeof service.setPendingPairing === "function") service.setPendingPairing(id, "")
+    }
+
+    function confirmUnpair(id) {
+        if (unpairConfirmingId && unpairConfirmingId !== id) return
+        unpairConfirmingId = ""
+        if (service) service.unpairDevice(id)
     }
 
     function selectDevice(id) {
@@ -231,10 +319,11 @@ Panel {
         }
     }
 
-    function confirmUnpair(id) {
-        if (unpairConfirmingId && unpairConfirmingId !== id) return
-        unpairConfirmingId = ""
-        if (service) service.unpairDevice(id)
+    function select(delta) {
+        var list = service ? service.devices : []
+        if (!list.length) return
+        selectedIndex = Math.max(0, Math.min(list.length - 1, selectedIndex + delta))
+        if (cursorActive) selectDevice(list[selectedIndex].id)
     }
 
     function openComposer(type) {
@@ -288,9 +377,6 @@ Panel {
         focusSection = availableActions.length > 0 ? "actions" : "devices"
         if (keyCatcher) keyCatcher.forceActiveFocus()
     }
-
-    onDraftPingChanged: if (composerSection && composerSection.pingInput && composerSection.pingInput.text !== draftPing) composerSection.pingInput.text = draftPing
-    onDraftTextChanged: if (composerSection && composerSection.textInput && composerSection.textInput.text !== draftText) composerSection.textInput.text = draftText
 
     function resetComposer() {
         activeComposer = "none"
@@ -349,11 +435,13 @@ Panel {
         return false
     }
 
-    function select(delta) {
-        var list = service ? service.devices : []
-        if (!list.length) return
-        selectedIndex = Math.max(0, Math.min(list.length - 1, selectedIndex + delta))
-        if (cursorActive) selectDevice(list[selectedIndex].id)
+    function toggleMediaExpanded() {
+        mediaExpanded = !mediaExpanded
+        mediaControlIndex = 1
+        if (mediaExpanded && service && device && device.capabilities && device.capabilities.media) {
+            service.fetchMediaStatus(device.id)
+            if (typeof service.requestPlayerList === "function") service.requestPlayerList(device.id)
+        }
     }
 
     function toggleCommandsExpanded() {
@@ -363,18 +451,18 @@ Panel {
         }
     }
 
+    function selectCommand(delta) {
+        var list = (service && service.remoteCommands) ? service.remoteCommands : []
+        if (!list.length) return
+        commandSelectedIndex = Math.max(0, Math.min(list.length - 1, commandSelectedIndex + delta))
+    }
+
     function toggleNetworkExpanded() {
         networkExpanded = !networkExpanded
         networkSelectedIndex = 0
         if (networkExpanded && service) {
             service.refreshTailscale()
         }
-    }
-
-    function selectCommand(delta) {
-        var list = (service && service.remoteCommands) ? service.remoteCommands : []
-        if (!list.length) return
-        commandSelectedIndex = Math.max(0, Math.min(list.length - 1, commandSelectedIndex + delta))
     }
 
     function activate() {
@@ -397,17 +485,21 @@ Panel {
                     if (pending !== "removing") root.requestUnpairConfirm(dev.id)
                 }
             }
-        } else if (focusSection === "refresh") { if (service) service.refresh(true) }
-        else if (focusSection === "actions") {
+        } else if (focusSection === "refresh") {
+            if (service) service.refresh(true)
+        } else if (focusSection === "actions") {
             var acts = availableActions
             if (acts.length > 0) {
                 var actIdx = Math.max(0, Math.min(acts.length - 1, actionSelectedIndex))
                 triggerAction(acts[actIdx])
             }
-        } else if (focusSection === "ring" && service && device) service.ringDevice(device.id)
-        else if (focusSection === "clipboard" && service && device) service.sendClipboard(device.id)
-        else if (focusSection === "file" && service && device) service.startFileSelection(device.id)
-        else if (focusSection === "ping") {
+        } else if (focusSection === "ring" && service && device) {
+            service.ringDevice(device.id)
+        } else if (focusSection === "clipboard" && service && device) {
+            service.sendClipboard(device.id)
+        } else if (focusSection === "file" && service && device) {
+            service.startFileSelection(device.id)
+        } else if (focusSection === "ping") {
             if (activeComposer === "ping") submitPing()
             else openComposer("ping")
         } else if (focusSection === "text") {
@@ -461,101 +553,69 @@ Panel {
             id: keyCatcher
             anchors.fill: parent
 
-        blocked: root.activeComposer !== "none" || !!(composerSection && ((composerSection.pingInput && composerSection.pingInput.activeFocus) || (composerSection.textInput && composerSection.textInput.activeFocus))) || !!(networkSection && networkSection.addressInput && networkSection.addressInput.activeFocus)
-        onMoveRequested: function(dx, dy) {
-            if (!root.cursorActive) root.cursorActive = true
-        }
-        onActivateRequested: root.activate()
-        onCloseRequested: {
-            if (root.unpairConfirmingId) root.cancelUnpairConfirm(root.unpairConfirmingId)
-            else if (root.activeComposer !== "none") root.closeComposer()
-            else root.close()
-        }
-        onTabRequested: function(direction) { if (root.bar && typeof root.bar.switchPanelFrom === "function") root.bar.switchPanelFrom(root.barIdentity, direction) }
-        onTextKey: function(value) {
-            if (root.activeComposer !== "none") return
-            var key = String(value).toLowerCase()
-            if (key === "r" && root.service) root.service.refresh(true)
-            else if (key === "j" || key === "down") {
-                if (root.focusSection === "devices") {
-                    var devList = (root.service && root.service.devices) ? root.service.devices : []
-                    if (devList.length > 0 && root.selectedIndex < devList.length - 1) root.select(1)
-                    else root.navigateNextSection()
-                } else if (root.focusSection === "commands" && root.commandsExpanded) {
-                    var cmdList = (root.service && root.service.remoteCommands) ? root.service.remoteCommands : []
-                    if (cmdList.length > 0 && root.commandSelectedIndex < cmdList.length - 1) root.selectCommand(1)
-                    else root.navigateNextSection()
-                } else if (root.focusSection === "network" && root.networkExpanded) {
-                    if (root.networkSelectedIndex < root.getNetworkItemCount() - 1) root.networkSelectedIndex++
-                    else root.navigateNextSection()
-                } else {
-                    root.navigateNextSection()
+            blocked: root.activeComposer !== "none" || !!(composerSection && ((composerSection.pingInput && composerSection.pingInput.activeFocus) || (composerSection.textInput && composerSection.textInput.activeFocus))) || !!(networkSection && networkSection.addressInput && networkSection.addressInput.activeFocus)
+            onMoveRequested: function(dx, dy) {
+                if (root.activeComposer !== "none") return
+                if (!root.cursorActive) {
+                    root.cursorActive = true
+                    return
+                }
+                if (dy > 0) root.moveDown()
+                else if (dy < 0) root.moveUp()
+                else if (dx > 0) root.moveRight()
+                else if (dx < 0) root.moveLeft()
+            }
+            onActivateRequested: root.activate()
+            onCloseRequested: {
+                if (root.unpairConfirmingId) root.cancelUnpairConfirm(root.unpairConfirmingId)
+                else if (root.activeComposer !== "none") root.closeComposer()
+                else root.close()
+            }
+            onTabRequested: function(direction) {
+                if (root.bar && typeof root.bar.switchPanelFrom === "function") {
+                    root.bar.switchPanelFrom(root.barIdentity, direction)
                 }
             }
-            else if (key === "k" || key === "up") {
-                if (root.focusSection === "devices") {
-                    if (root.selectedIndex > 0) root.select(-1)
-                    else root.navigatePrevSection()
-                } else if (root.focusSection === "commands" && root.commandsExpanded) {
-                    if (root.commandSelectedIndex > 0) root.selectCommand(-1)
-                    else root.navigatePrevSection()
-                } else if (root.focusSection === "network" && root.networkExpanded) {
-                    if (root.networkSelectedIndex > 0) root.networkSelectedIndex--
-                    else root.navigatePrevSection()
-                } else {
-                    root.navigatePrevSection()
-                }
-            }
-            else if (key === "l" || key === "right") {
-                if (root.focusSection === "actions") {
-                    if (root.actionSelectedIndex < root.availableActions.length - 1) root.actionSelectedIndex++
-                    else root.navigateNextSection()
-                } else if (root.focusSection === "media") {
-                    if (root.mediaExpanded && root.mediaControlIndex < 2) root.mediaControlIndex++
-                    else root.navigateNextSection()
-                } else {
-                    root.navigateNextSection()
-                }
-            }
-            else if (key === "h" || key === "left") {
-                if (root.focusSection === "actions") {
-                    if (root.actionSelectedIndex > 0) root.actionSelectedIndex--
-                    else root.navigatePrevSection()
-                } else if (root.focusSection === "media") {
-                    if (root.mediaExpanded && root.mediaControlIndex > 0) root.mediaControlIndex--
-                    else root.navigatePrevSection()
-                } else {
-                    root.navigatePrevSection()
-                }
-            }
-            else if (key === "p" && root.focusSection === "devices") {
-                var listP = root.service ? root.service.devices : []
-                var devP = listP[root.selectedIndex]
-                if (devP && !devP.paired && root.service) {
-                    var pendP = (root.service.pendingPairing && root.service.pendingPairing[devP.id]) ? root.service.pendingPairing[devP.id] : ""
-                    if (pendP !== "requesting") root.service.pairDevice(devP.id)
-                }
-            }
-            else if (key === "u" && root.focusSection === "devices") {
-                var listU = root.service ? root.service.devices : []
-                var devU = listU[root.selectedIndex]
-                if (devU && devU.paired && root.service) {
-                    var pendU = (root.service.pendingPairing && root.service.pendingPairing[devU.id]) ? root.service.pendingPairing[devU.id] : ""
-                    if (pendU !== "removing") root.requestUnpairConfirm(devU.id)
-                }
-            }
-            else if (key === "y" && root.unpairConfirmingId) {
-                var listY = root.service ? root.service.devices : []
-                var devY = listY[root.selectedIndex]
-                if (devY && devY.id === root.unpairConfirmingId) root.confirmUnpair(root.unpairConfirmingId)
-            }
-            else if ((key === "c" || key === "escape")) {
-                var targetIdC = root.unpairConfirmingId || (root.service ? root.service.selectedDeviceId : "")
-                if (root.unpairConfirmingId || (root.service && targetIdC && root.service.pendingPairing && root.service.pendingPairing[targetIdC] === "unpair_confirm")) {
-                    root.cancelUnpairConfirm(targetIdC)
-                } else if (root.service && targetIdC && root.service.pendingPairing && root.service.pendingPairing[targetIdC] === "requesting") {
-                    root.service.setPendingPairing(targetIdC, "")
-                    if (typeof root.service.clearActionState === "function") root.service.clearActionState()
+            onTextKey: function(value) {
+                if (root.activeComposer !== "none") return
+                if (!root.cursorActive) root.cursorActive = true
+                var key = String(value).toLowerCase()
+                if (key === "r" && root.service) {
+                    root.service.refresh(true)
+                } else if (key === "j" || key === "down") {
+                    root.moveDown()
+                } else if (key === "k" || key === "up") {
+                    root.moveUp()
+                } else if (key === "l" || key === "right") {
+                    root.moveRight()
+                } else if (key === "h" || key === "left") {
+                    root.moveLeft()
+                } else if (key === "p" && root.focusSection === "devices") {
+                    var listP = root.service ? root.service.devices : []
+                    var devP = listP[root.selectedIndex]
+                    if (devP && !devP.paired && root.service) {
+                        var pendP = (root.service.pendingPairing && root.service.pendingPairing[devP.id]) ? root.service.pendingPairing[devP.id] : ""
+                        if (pendP !== "requesting") root.service.pairDevice(devP.id)
+                    }
+                } else if (key === "u" && root.focusSection === "devices") {
+                    var listU = root.service ? root.service.devices : []
+                    var devU = listU[root.selectedIndex]
+                    if (devU && devU.paired && root.service) {
+                        var pendU = (root.service.pendingPairing && root.service.pendingPairing[devU.id]) ? root.service.pendingPairing[devU.id] : ""
+                        if (pendU !== "removing") root.requestUnpairConfirm(devU.id)
+                    }
+                } else if (key === "y" && root.unpairConfirmingId) {
+                    var listY = root.service ? root.service.devices : []
+                    var devY = listY[root.selectedIndex]
+                    if (devY && devY.id === root.unpairConfirmingId) root.confirmUnpair(root.unpairConfirmingId)
+                } else if (key === "c" || key === "escape") {
+                    var targetIdC = root.unpairConfirmingId || (root.service ? root.service.selectedDeviceId : "")
+                    if (root.unpairConfirmingId || (root.service && targetIdC && root.service.pendingPairing && root.service.pendingPairing[targetIdC] === "unpair_confirm")) {
+                        root.cancelUnpairConfirm(targetIdC)
+                    } else if (root.service && targetIdC && root.service.pendingPairing && root.service.pendingPairing[targetIdC] === "requesting") {
+                        root.service.setPendingPairing(targetIdC, "")
+                        if (typeof root.service.clearActionState === "function") root.service.clearActionState()
+                    }
                 }
             }
         }
@@ -605,5 +665,4 @@ Panel {
             }
         }
     }
-}
 }
