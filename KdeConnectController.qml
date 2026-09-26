@@ -11,45 +11,76 @@ Item {
     property bool scanning: false
     property string discoveryState: "starting"
     property string discoveryMessage: "Checking KDE Connect"
+    property int generation: 0
+    property bool scanQueued: false
+
+    property string selectedDeviceId: ""
+    property var devices: []
+    property var remoteCommands: []
+    property bool commandsLoading: false
+
     property string actionState: "idle"
     property string actionMessage: ""
     property string actionError: ""
+    property int actionGeneration: 0
+
     property string fileTransferState: "idle"
     property string fileTransferMessage: ""
     property string fileTransferError: ""
+    property int fileTransferGeneration: 0
+    property bool fileBusy: false
 
-    Timer {
-        id: actionDismissTimer
-        interval: 4000
-        repeat: false
-        onTriggered: {
-            root.actionMessage = ""
-            root.actionError = ""
-        }
-    }
+    property var pendingPairing: ({})
+    property var pairingRequestTimes: ({})
 
-    Timer {
-        id: fileTransferDismissTimer
-        interval: 4000
-        repeat: false
-        onTriggered: {
-            if (root.fileBusy || root.fileTransferState === "transferring") return
-            root.fileTransferMessage = ""
-            root.fileTransferError = ""
-            if (root.fileTransferState === "accepted" || root.fileTransferState === "cancelled" || root.fileTransferState === "failed") {
-                root.fileTransferState = "idle"
-            }
+    property bool tailscaleInstalled: false
+    property bool tailscaleRunning: false
+    property bool tailscaleLoading: false
+    property string tailscaleStatus: "Checking Tailscale"
+    property string localTailscaleAddress: ""
+    property var tailscalePeers: []
+    property var customAddresses: []
+    property bool customAddressesReady: false
+    property bool addressBusy: false
+
+    property var mediaState: ({
+        isPlaying: false,
+        title: "",
+        artist: "",
+        album: "",
+        player: "",
+        playerList: [],
+        albumArt: ""
+    })
+    property bool mediaLoading: false
+    property bool mediaRefreshPending: false
+
+    property int monitorRestartCount: 0
+
+    readonly property var reachableDevices: devices.filter(function(device) { return device.reachable })
+    readonly property var selectedDevice: deviceById(selectedDeviceId)
+    readonly property var incomingPairRequest: {
+        for (var i = 0; i < devices.length; i++) {
+            if (devices[i].pairRequestedByPeer) return devices[i]
         }
+        return null
     }
+    readonly property bool connected: reachableDevices.length > 0
 
     onActionMessageChanged: {
-        if (actionMessage !== "" || actionError !== "") actionDismissTimer.restart()
-        else actionDismissTimer.stop()
+        if (actionMessage !== "" || actionError !== "") {
+            actionDismissTimer.restart()
+        } else {
+            actionDismissTimer.stop()
+        }
     }
 
     onActionErrorChanged: {
-        if (actionMessage !== "" || actionError !== "") actionDismissTimer.restart()
-        else actionDismissTimer.stop()
+        if (actionMessage !== "" || actionError !== "") {
+            actionDismissTimer.restart()
+        } else {
+            actionDismissTimer.stop()
+        }
     }
 
     onFileTransferMessageChanged: {
@@ -71,338 +102,12 @@ Item {
             fileTransferDismissTimer.stop()
         }
     }
-    property string selectedDeviceId: ""
-    property var devices: []
-    property var remoteCommands: []
-    property bool commandsLoading: false
-    property int generation: 0
-    property int actionGeneration: 0
-    property int fileTransferGeneration: 0
-    property bool scanQueued: false
-    property var pendingPairing: ({})
-    property var pairingRequestTimes: ({})
-    property bool fileBusy: false
-    property int monitorRestartCount: 0
-    property bool tailscaleInstalled: false
-    property bool tailscaleRunning: false
-    property bool tailscaleLoading: false
-    property string tailscaleStatus: "Checking Tailscale"
-    property string localTailscaleAddress: ""
-    property var tailscalePeers: []
-    property var customAddresses: []
-    property bool customAddressesReady: false
-    property bool addressBusy: false
-    property var mediaState: ({
-        isPlaying: false,
-        title: "",
-        artist: "",
-        album: "",
-        player: "",
-        playerList: [],
-        albumArt: ""
-    })
-    property bool mediaLoading: false
-    property bool mediaRefreshPending: false
-
-    readonly property var reachableDevices: devices.filter(function(device) { return device.reachable })
-    readonly property var selectedDevice: deviceById(selectedDeviceId)
-    readonly property var incomingPairRequest: {
-        for (var i = 0; i < devices.length; i++) {
-            if (devices[i].pairRequestedByPeer) return devices[i]
-        }
-        return null
-    }
-    readonly property bool connected: reachableDevices.length > 0
 
     function deviceById(id) {
-        for (var i = 0; i < devices.length; i++)
+        for (var i = 0; i < devices.length; i++) {
             if (devices[i].id === String(id)) return devices[i]
+        }
         return null
-    }
-
-    function emptyMediaState() {
-        return ({ isPlaying: false, title: "", artist: "", album: "", player: "", playerList: [], albumArt: "" })
-    }
-
-    function selectDevice(id) {
-        var next = deviceById(id)
-        if (!next) return
-        if (selectedDeviceId === next.id) return
-        selectedDeviceId = next.id
-        actionState = "idle"
-        actionMessage = ""
-        actionError = ""
-        fileBusy = false
-        fileTransferState = "idle"
-        fileTransferMessage = ""
-        fileTransferError = ""
-        mediaState = emptyMediaState()
-        mediaLoading = false
-        mediaRefreshPending = false
-        actionGeneration += 1
-        fileTransferGeneration += 1
-        if (mediaStatusProcess.running) mediaStatusProcess.running = false
-        if (mediaActionProcess.running) mediaActionProcess.running = false
-        if (mediaPlayerProcess.running) mediaPlayerProcess.running = false
-        if (actionProcess.running) actionProcess.running = false
-        if (fileTransferProcess.running) fileTransferProcess.running = false
-        if (filePickerProcess.running) filePickerProcess.running = false
-        remoteCommands = []
-        commandsLoading = false
-        if (commandsProcess.running) commandsProcess.running = false
-        if (next.paired && next.reachable && next.capabilities && next.capabilities.media) {
-            fetchMediaStatus(next.id)
-            requestPlayerList(next.id)
-        }
-    }
-
-    function clearActionState() {
-        actionState = "idle"
-        actionMessage = ""
-        actionError = ""
-        fileBusy = false
-        fileTransferState = "idle"
-        fileTransferMessage = ""
-        fileTransferError = ""
-    }
-
-    function safeError(exitCode, operation) {
-        if (exitCode === 127 || exitCode === 69) return operation + " unavailable"
-        if (exitCode === 2) return operation + " rejected"
-        if (exitCode === 3) return operation + " timed out"
-        return operation + " failed"
-    }
-
-    function setPendingPairing(id, state) {
-        var copy = Object.assign({}, pendingPairing)
-        if (state) {
-            copy[String(id)] = state
-        } else {
-            delete copy[String(id)]
-            var times = Object.assign({}, pairingRequestTimes)
-            delete times[String(id)]
-            pairingRequestTimes = times
-        }
-        pendingPairing = copy
-    }
-
-    function canAct(id) {
-        var device = deviceById(id)
-        return !!(device && device.paired && device.reachable)
-    }
-
-    function scriptPath(relativePath) {
-        var resolved = Qt.resolvedUrl(relativePath).toString().replace(/^file:\/\//, "")
-        try {
-            return decodeURIComponent(resolved)
-        } catch (error) {
-            return resolved
-        }
-    }
-
-    function getScriptPath() {
-        return scriptPath("scripts/discover_devices.sh")
-    }
-
-    function formatVerificationKey(key) {
-        var value = String(key || "").trim()
-        return value.length === 8 ? value.slice(0, 4) + " " + value.slice(4) : value
-    }
-
-    function addressError(address) {
-        var value = String(address || "").trim()
-        if (!value) return "Enter an IP address"
-        if (/\s|\/|\[|\]|%/.test(value)) return "Enter a literal IPv4 or IPv6 address"
-        var ipv4 = value.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
-        if (ipv4) {
-            for (var i = 1; i <= 4; i++) if (Number(ipv4[i]) > 255) return "Invalid IPv4 address"
-            return ""
-        }
-        if (/^[0-9a-fA-F:]+$/.test(value) && value.indexOf(":::") === -1) {
-            var halves = value.split("::")
-            if (halves.length === 1) {
-                var fullGroups = value.split(":")
-                if (fullGroups.length === 8 && fullGroups.every(function(group) { return /^[0-9a-fA-F]{1,4}$/.test(group) })) return ""
-            } else if (halves.length === 2) {
-                var leftGroups = halves[0] ? halves[0].split(":") : []
-                var rightGroups = halves[1] ? halves[1].split(":") : []
-                var compressedGroups = leftGroups.concat(rightGroups)
-                if (compressedGroups.length > 0 && compressedGroups.length < 8 && compressedGroups.every(function(group) { return /^[0-9a-fA-F]{1,4}$/.test(group) })) return ""
-            }
-        }
-        return "Enter a literal IPv4 or IPv6 address"
-    }
-
-    function isAddressSaved(address) {
-        return customAddresses.indexOf(String(address || "").trim()) !== -1
-    }
-
-    function filteredTailscalePeers(query) {
-        var needle = String(query || "").trim().toLowerCase()
-        if (!needle) return tailscalePeers
-        return tailscalePeers.filter(function(peer) {
-            return [peer.name, peer.hostName, peer.dnsName, peer.address, peer.os].some(function(field) {
-                return String(field || "").toLowerCase().indexOf(needle) !== -1
-            })
-        })
-    }
-
-    function extractIPv4(addresses) {
-        var list = addresses || []
-        for (var i = 0; i < list.length; i++) {
-            if (/^\d+\.\d+\.\d+\.\d+$/.test(String(list[i]))) return String(list[i])
-        }
-        return ""
-    }
-
-    function parseTailscaleStatus(output) {
-        var data = JSON.parse(String(output || "{}"))
-        var backend = String(data.BackendState || "")
-        var running = backend === "Running"
-        var localAddresses = (data.Self && data.Self.TailscaleIPs) || data.TailscaleIPs || []
-        var local = extractIPv4(localAddresses)
-        var peers = []
-        var rawPeers = data.Peer || {}
-        Object.keys(rawPeers).forEach(function(key) {
-            var raw = rawPeers[key] || {}
-            var address = extractIPv4(raw.TailscaleIPs || [])
-            if (!address) return
-            var dns = String(raw.DNSName || "").replace(/\.$/, "")
-            var host = String(raw.HostName || "")
-            peers.push({
-                id: String(raw.ID || key),
-                name: host || (dns ? dns.split(".")[0] : address),
-                hostName: host,
-                dnsName: dns,
-                os: String(raw.OS || ""),
-                address: address,
-                online: raw.Online === true
-            })
-        })
-        peers.sort(function(a, b) {
-            if (a.online !== b.online) return a.online ? -1 : 1
-            return a.name.localeCompare(b.name)
-        })
-        return { running: running, backend: backend, localAddress: local, peers: peers }
-    }
-
-    function refreshTailscale() {
-        if (tailscaleProcess.running) return
-        tailscaleLoading = true
-        tailscaleProcess.command = ["sh", "-c", "command -v tailscale >/dev/null 2>&1 || exit 127; exec tailscale status --json"]
-        tailscaleProcess.running = true
-    }
-
-    function addCustomAddress(address) {
-        var value = String(address || "").trim()
-        if (!customAddressesReady) {
-            actionState = "blocked"
-            actionMessage = ""
-            actionError = "KDE Connect address list is not ready"
-            return false
-        }
-        var error = addressError(value)
-        if (error) {
-            actionState = "blocked"
-            actionMessage = ""
-            actionError = error
-            return false
-        }
-        if (isAddressSaved(value)) {
-            actionState = "accepted"
-            actionMessage = "Address already saved; discovering devices"
-            actionError = ""
-            refresh(true)
-            return true
-        }
-        return writeCustomAddress(value, false)
-    }
-
-    function removeCustomAddress(address) {
-        var value = String(address || "").trim()
-        if (!customAddressesReady || !isAddressSaved(value)) return false
-        return writeCustomAddress(value, true)
-    }
-
-    function getAddressScriptPath() {
-        return scriptPath("scripts/update_custom_address.sh")
-    }
-
-    function writeCustomAddress(address, removal) {
-        if (!customAddressesReady || addressProcess.running) return false
-        addressBusy = true
-        addressProcess.targetAddress = address
-        addressProcess.removal = removal
-        addressProcess.command = ["bash", getAddressScriptPath(), removal ? "remove" : "add", address]
-        actionState = "running"
-        actionMessage = removal ? "Removing saved address" : "Saving address"
-        actionError = ""
-        addressProcess.running = true
-        return true
-    }
-
-    function getPickerScriptPath() {
-        return scriptPath("scripts/pick_file.sh")
-    }
-
-    function getSmsScriptPath() {
-        return scriptPath("scripts/open_sms.sh")
-    }
-
-    function getAppScriptPath() {
-        return scriptPath("scripts/open_app.sh")
-    }
-
-    function openKdeConnectApp() {
-        if (appProcess.running) return false
-        actionState = "running"
-        actionMessage = "Opening KDE Connect"
-        actionError = ""
-        appProcess.command = ["bash", getAppScriptPath()]
-        appProcess.running = true
-        return true
-    }
-
-    function getFirewallScriptPath() {
-        return scriptPath("scripts/setup_firewall.sh")
-    }
-
-    function configureFirewall() {
-        if (firewallProcess.running) return
-        var script = getFirewallScriptPath()
-        firewallProcess.command = ["bash", "-c", "if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then omarchy-launch-floating-terminal-with-presentation \"bash '" + script + "'\"; else xdg-terminal-exec bash '" + script + "'; fi"]
-        firewallProcess.running = true
-    }
-
-    function getInstallScriptPath() {
-        return scriptPath("scripts/install_dependencies.sh")
-    }
-
-    function installDependencies() {
-        if (installProcess.running) return
-        var script = getInstallScriptPath()
-        installProcess.command = ["bash", "-c", "if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then omarchy-launch-floating-terminal-with-presentation \"bash '" + script + "'\"; else xdg-terminal-exec bash '" + script + "'; fi"]
-        installProcess.running = true
-    }
-
-    function refresh(forceNetwork) {
-        if (forceNetwork) refreshTailscale()
-        if (scanProcess.running) {
-            if (forceNetwork) scanQueued = true
-            return
-        }
-        var nextGeneration = generation + 1
-        generation = nextGeneration
-        scanning = true
-        if (discoveryState !== "ready") {
-            discoveryState = "checking"
-            discoveryMessage = "Checking KDE Connect"
-        }
-        scanProcess.targetGeneration = nextGeneration
-        var cmd = ["bash", getScriptPath()]
-        if (forceNetwork) cmd.push("--refresh")
-        scanProcess.command = cmd
-        scanProcess.running = true
     }
 
     function deviceOverviewStatus(device) {
@@ -468,6 +173,130 @@ Item {
         return "󰀂"
     }
 
+    function formatVerificationKey(key) {
+        var value = String(key || "").trim()
+        return value.length === 8 ? value.slice(0, 4) + " " + value.slice(4) : value
+    }
+
+    function emptyMediaState() {
+        return ({ isPlaying: false, title: "", artist: "", album: "", player: "", playerList: [], albumArt: "" })
+    }
+
+    function safeError(exitCode, operation) {
+        if (exitCode === 127 || exitCode === 69) return operation + " unavailable"
+        if (exitCode === 2) return operation + " rejected"
+        if (exitCode === 3) return operation + " timed out"
+        return operation + " failed"
+    }
+
+    function canAct(id) {
+        var device = deviceById(id)
+        return !!(device && device.paired && device.reachable)
+    }
+
+    function clearActionState() {
+        actionState = "idle"
+        actionMessage = ""
+        actionError = ""
+        fileBusy = false
+        fileTransferState = "idle"
+        fileTransferMessage = ""
+        fileTransferError = ""
+    }
+
+    function selectDevice(id) {
+        var next = deviceById(id)
+        if (!next) return
+        if (selectedDeviceId === next.id) return
+        selectedDeviceId = next.id
+        actionState = "idle"
+        actionMessage = ""
+        actionError = ""
+        fileBusy = false
+        fileTransferState = "idle"
+        fileTransferMessage = ""
+        fileTransferError = ""
+        mediaState = emptyMediaState()
+        mediaLoading = false
+        mediaRefreshPending = false
+        actionGeneration += 1
+        fileTransferGeneration += 1
+        if (mediaStatusProcess.running) mediaStatusProcess.running = false
+        if (mediaActionProcess.running) mediaActionProcess.running = false
+        if (mediaPlayerProcess.running) mediaPlayerProcess.running = false
+        if (actionProcess.running) actionProcess.running = false
+        if (fileTransferProcess.running) fileTransferProcess.running = false
+        if (filePickerProcess.running) filePickerProcess.running = false
+        remoteCommands = []
+        commandsLoading = false
+        if (commandsProcess.running) commandsProcess.running = false
+        if (next.paired && next.reachable && next.capabilities && next.capabilities.media) {
+            fetchMediaStatus(next.id)
+            requestPlayerList(next.id)
+        }
+    }
+
+    function scriptPath(relativePath) {
+        var resolved = Qt.resolvedUrl(relativePath).toString().replace(/^file:\/\//, "")
+        try {
+            return decodeURIComponent(resolved)
+        } catch (error) {
+            return resolved
+        }
+    }
+
+    function getScriptPath() {
+        return scriptPath("scripts/discover_devices.sh")
+    }
+
+    function getPickerScriptPath() {
+        return scriptPath("scripts/pick_file.sh")
+    }
+
+    function getSmsScriptPath() {
+        return scriptPath("scripts/open_sms.sh")
+    }
+
+    function getAppScriptPath() {
+        return scriptPath("scripts/open_app.sh")
+    }
+
+    function getFirewallScriptPath() {
+        return scriptPath("scripts/setup_firewall.sh")
+    }
+
+    function getInstallScriptPath() {
+        return scriptPath("scripts/install_dependencies.sh")
+    }
+
+    function getMediaScriptPath() {
+        return scriptPath("scripts/media_control.sh")
+    }
+
+    function getAddressScriptPath() {
+        return scriptPath("scripts/update_custom_address.sh")
+    }
+
+    function refresh(forceNetwork) {
+        if (forceNetwork) refreshTailscale()
+        if (scanProcess.running) {
+            if (forceNetwork) scanQueued = true
+            return
+        }
+        var nextGeneration = generation + 1
+        generation = nextGeneration
+        scanning = true
+        if (discoveryState !== "ready") {
+            discoveryState = "checking"
+            discoveryMessage = "Checking KDE Connect"
+        }
+        scanProcess.targetGeneration = nextGeneration
+        var cmd = ["bash", getScriptPath()]
+        if (forceNetwork) cmd.push("--refresh")
+        scanProcess.command = cmd
+        scanProcess.running = true
+    }
+
     function parseScanLine(line) {
         var cleanLine = String(line || "").trim()
         var parts = cleanLine.split("\t")
@@ -505,12 +334,6 @@ Item {
                 pair: true
             }
         }
-    }
-
-    function openSmsApp(id) {
-        var device = deviceById(id)
-        if (!device) return false
-        return startAction(id, ["bash", getSmsScriptPath(), String(id)], "SMS app opened", "SMS app")
     }
 
     function applyScan(output, targetGeneration) {
@@ -604,8 +427,9 @@ Item {
                     }
                 }
                 selectDevice((preferred || next[0]).id)
+            } else {
+                clearActionState()
             }
-            else clearActionState()
         }
         daemonAvailable = scanProcess.exitCode === 0
         sessionBusAvailable = scanProcess.exitCode !== 127
@@ -702,6 +526,12 @@ Item {
             return false
         }
         return startAction(id, ["kdeconnect-cli", "-d", String(id), "--send-clipboard"], "Clipboard synced", "clipboard")
+    }
+
+    function openSmsApp(id) {
+        var device = deviceById(id)
+        if (!device) return false
+        return startAction(id, ["bash", getSmsScriptPath(), String(id)], "SMS app opened", "SMS app")
     }
 
     function startFileSelection(id) {
@@ -855,6 +685,19 @@ Item {
         return startAction(id, ["kdeconnect-cli", "-d", String(id), "--execute-command", value], "Command executed", "remote command")
     }
 
+    function setPendingPairing(id, state) {
+        var copy = Object.assign({}, pendingPairing)
+        if (state) {
+            copy[String(id)] = state
+        } else {
+            delete copy[String(id)]
+            var times = Object.assign({}, pairingRequestTimes)
+            delete times[String(id)]
+            pairingRequestTimes = times
+        }
+        pendingPairing = copy
+    }
+
     function pairDevice(id) {
         var device = deviceById(id)
         if (!device || pairProcess.running || actionProcess.running || !device.capabilities.pair) return false
@@ -907,10 +750,6 @@ Item {
         pairProcess.command = ["kdeconnect-cli", "-d", String(id), "--unpair"]
         pairProcess.running = true
         return true
-    }
-
-    function getMediaScriptPath() {
-        return scriptPath("scripts/media_control.sh")
     }
 
     function fetchMediaStatus(id) {
@@ -997,6 +836,244 @@ Item {
         }
     }
 
+    function addressError(address) {
+        var value = String(address || "").trim()
+        if (!value) return "Enter an IP address"
+        if (/\s|\/|\[|\]|%/.test(value)) return "Enter a literal IPv4 or IPv6 address"
+        var ipv4 = value.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+        if (ipv4) {
+            for (var i = 1; i <= 4; i++) {
+                if (Number(ipv4[i]) > 255) return "Invalid IPv4 address"
+            }
+            return ""
+        }
+        if (/^[0-9a-fA-F:]+$/.test(value) && value.indexOf(":::") === -1) {
+            var halves = value.split("::")
+            if (halves.length === 1) {
+                var fullGroups = value.split(":")
+                if (fullGroups.length === 8 && fullGroups.every(function(group) { return /^[0-9a-fA-F]{1,4}$/.test(group) })) return ""
+            } else if (halves.length === 2) {
+                var leftGroups = halves[0] ? halves[0].split(":") : []
+                var rightGroups = halves[1] ? halves[1].split(":") : []
+                var compressedGroups = leftGroups.concat(rightGroups)
+                if (compressedGroups.length > 0 && compressedGroups.length < 8 && compressedGroups.every(function(group) { return /^[0-9a-fA-F]{1,4}$/.test(group) })) return ""
+            }
+        }
+        return "Enter a literal IPv4 or IPv6 address"
+    }
+
+    function isAddressSaved(address) {
+        return customAddresses.indexOf(String(address || "").trim()) !== -1
+    }
+
+    function filteredTailscalePeers(query) {
+        var needle = String(query || "").trim().toLowerCase()
+        if (!needle) return tailscalePeers
+        return tailscalePeers.filter(function(peer) {
+            return [peer.name, peer.hostName, peer.dnsName, peer.address, peer.os].some(function(field) {
+                return String(field || "").toLowerCase().indexOf(needle) !== -1
+            })
+        })
+    }
+
+    function extractIPv4(addresses) {
+        var list = addresses || []
+        for (var i = 0; i < list.length; i++) {
+            if (/^\d+\.\d+\.\d+\.\d+$/.test(String(list[i]))) return String(list[i])
+        }
+        return ""
+    }
+
+    function parseTailscaleStatus(output) {
+        var data = JSON.parse(String(output || "{}"))
+        var backend = String(data.BackendState || "")
+        var running = backend === "Running"
+        var localAddresses = (data.Self && data.Self.TailscaleIPs) || data.TailscaleIPs || []
+        var local = extractIPv4(localAddresses)
+        var peers = []
+        var rawPeers = data.Peer || {}
+        Object.keys(rawPeers).forEach(function(key) {
+            var raw = rawPeers[key] || {}
+            var address = extractIPv4(raw.TailscaleIPs || [])
+            if (!address) return
+            var dns = String(raw.DNSName || "").replace(/\.$/, "")
+            var host = String(raw.HostName || "")
+            peers.push({
+                id: String(raw.ID || key),
+                name: host || (dns ? dns.split(".")[0] : address),
+                hostName: host,
+                dnsName: dns,
+                os: String(raw.OS || ""),
+                address: address,
+                online: raw.Online === true
+            })
+        })
+        peers.sort(function(a, b) {
+            if (a.online !== b.online) return a.online ? -1 : 1
+            return a.name.localeCompare(b.name)
+        })
+        return { running: running, backend: backend, localAddress: local, peers: peers }
+    }
+
+    function refreshTailscale() {
+        if (tailscaleProcess.running) return
+        tailscaleLoading = true
+        tailscaleProcess.command = ["sh", "-c", "command -v tailscale >/dev/null 2>&1 || exit 127; exec tailscale status --json"]
+        tailscaleProcess.running = true
+    }
+
+    function addCustomAddress(address) {
+        var value = String(address || "").trim()
+        if (!customAddressesReady) {
+            actionState = "blocked"
+            actionMessage = ""
+            actionError = "KDE Connect address list is not ready"
+            return false
+        }
+        var error = addressError(value)
+        if (error) {
+            actionState = "blocked"
+            actionMessage = ""
+            actionError = error
+            return false
+        }
+        if (isAddressSaved(value)) {
+            actionState = "accepted"
+            actionMessage = "Address already saved; discovering devices"
+            actionError = ""
+            refresh(true)
+            return true
+        }
+        return writeCustomAddress(value, false)
+    }
+
+    function removeCustomAddress(address) {
+        var value = String(address || "").trim()
+        if (!customAddressesReady || !isAddressSaved(value)) return false
+        return writeCustomAddress(value, true)
+    }
+
+    function writeCustomAddress(address, removal) {
+        if (!customAddressesReady || addressProcess.running) return false
+        addressBusy = true
+        addressProcess.targetAddress = address
+        addressProcess.removal = removal
+        addressProcess.command = ["bash", getAddressScriptPath(), removal ? "remove" : "add", address]
+        actionState = "running"
+        actionMessage = removal ? "Removing saved address" : "Saving address"
+        actionError = ""
+        addressProcess.running = true
+        return true
+    }
+
+    function openKdeConnectApp() {
+        if (appProcess.running) return false
+        actionState = "running"
+        actionMessage = "Opening KDE Connect"
+        actionError = ""
+        appProcess.command = ["bash", getAppScriptPath()]
+        appProcess.running = true
+        return true
+    }
+
+    function configureFirewall() {
+        if (firewallProcess.running) return
+        var script = getFirewallScriptPath()
+        firewallProcess.command = ["bash", "-c", "if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then omarchy-launch-floating-terminal-with-presentation \"bash '" + script + "'\"; else xdg-terminal-exec bash '" + script + "'; fi"]
+        firewallProcess.running = true
+    }
+
+    function installDependencies() {
+        if (installProcess.running) return
+        var script = getInstallScriptPath()
+        installProcess.command = ["bash", "-c", "if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then omarchy-launch-floating-terminal-with-presentation \"bash '" + script + "'\"; else xdg-terminal-exec bash '" + script + "'; fi"]
+        installProcess.running = true
+    }
+
+    Timer {
+        id: actionDismissTimer
+        interval: 4000
+        repeat: false
+        onTriggered: {
+            root.actionMessage = ""
+            root.actionError = ""
+        }
+    }
+
+    Timer {
+        id: fileTransferDismissTimer
+        interval: 4000
+        repeat: false
+        onTriggered: {
+            if (root.fileBusy || root.fileTransferState === "transferring") return
+            root.fileTransferMessage = ""
+            root.fileTransferError = ""
+            if (root.fileTransferState === "accepted" || root.fileTransferState === "cancelled" || root.fileTransferState === "failed") {
+                root.fileTransferState = "idle"
+            }
+        }
+    }
+
+    Timer {
+        id: dbusDebounceTimer; interval: 500
+        repeat: false
+        onTriggered: root.refresh()
+    }
+
+    Timer {
+        id: mediaDebounceTimer; interval: 500
+        repeat: false
+        onTriggered: if (root.selectedDeviceId) root.fetchMediaStatus(root.selectedDeviceId)
+    }
+
+    Timer {
+        id: pairingWatchdogTimer
+        interval: 1000
+        repeat: true
+        onTriggered: {
+            var now = Date.now()
+            var anyRequesting = false
+            var timedOutSelected = false
+            for (var devId in root.pendingPairing) {
+                if (root.pendingPairing[devId] === "requesting") {
+                    var reqTime = root.pairingRequestTimes[devId] || 0
+                    if (now - reqTime >= 30000) {
+                        root.setPendingPairing(devId, "")
+                        if (devId === root.selectedDeviceId) timedOutSelected = true
+                    } else {
+                        anyRequesting = true
+                    }
+                }
+            }
+            if (timedOutSelected) {
+                root.actionState = "failed"
+                root.actionMessage = ""
+                root.actionError = "Pairing timed out or rejected"
+            }
+            if (!anyRequesting) pairingWatchdogTimer.stop()
+        }
+    }
+
+    Timer {
+        id: monitorStabilityTimer
+        interval: 10000
+        repeat: false
+        onTriggered: monitorRestartCount = 0
+    }
+
+    Timer {
+        id: signalRestart
+        repeat: false
+        onTriggered: if (!signalProcess.running) signalProcess.running = true
+    }
+
+    Timer {
+        interval: 15000
+        running: !signalProcess.running
+        repeat: true
+        onTriggered: root.refresh()
+    }
+
     Process {
         id: scanProcess
         property int targetGeneration: 0
@@ -1059,8 +1136,9 @@ Item {
             var isPair = pairProcess.command && pairProcess.command.indexOf("--pair") !== -1
             var op = isPair ? "pairing" : "unpairing"
             if (isPair) {
-                if (code === 0) root.setPendingPairing(targetDeviceId, "requesting")
-                else {
+                if (code === 0) {
+                    root.setPendingPairing(targetDeviceId, "requesting")
+                } else {
                     root.setPendingPairing(targetDeviceId, "")
                     var stillRequesting = false
                     for (var pendingId in root.pendingPairing) {
@@ -1109,45 +1187,6 @@ Item {
         }
     }
 
-    Timer { id: dbusDebounceTimer; interval: 500; repeat: false; onTriggered: root.refresh() }
-    Timer { id: mediaDebounceTimer; interval: 500; repeat: false; onTriggered: if (root.selectedDeviceId) root.fetchMediaStatus(root.selectedDeviceId) }
-
-    Timer {
-        id: pairingWatchdogTimer
-        interval: 1000
-        repeat: true
-        onTriggered: {
-            var now = Date.now()
-            var anyRequesting = false
-            var timedOutSelected = false
-            for (var devId in root.pendingPairing) {
-                if (root.pendingPairing[devId] === "requesting") {
-                    var reqTime = root.pairingRequestTimes[devId] || 0
-                    if (now - reqTime >= 30000) {
-                        root.setPendingPairing(devId, "")
-                        if (devId === root.selectedDeviceId) timedOutSelected = true
-                    } else {
-                        anyRequesting = true
-                    }
-                }
-            }
-            if (timedOutSelected) {
-                root.actionState = "failed"
-                root.actionMessage = ""
-                root.actionError = "Pairing timed out or rejected"
-            }
-            if (!anyRequesting) pairingWatchdogTimer.stop()
-        }
-    }
-
-    Timer {
-        id: monitorStabilityTimer
-        interval: 10000
-        repeat: false
-        // ponytail: sustained uptime resets backoff; immediate reset would pin crash loops at 1s
-        onTriggered: monitorRestartCount = 0
-    }
-
     Process {
         id: signalProcess
         command: [
@@ -1163,32 +1202,34 @@ Item {
             if (running) monitorStabilityTimer.restart()
             else monitorStabilityTimer.stop()
         }
-        stdout: SplitParser { onRead: function(line) {
-            var value = String(line || "").trim()
-            if (!value) return
-            var isSignal = value.indexOf("sig\t") === 0 || value.indexOf("signal ") === 0
-            if (!isSignal) return
+        stdout: SplitParser {
+            onRead: function(line) {
+                var value = String(line || "").trim()
+                if (!value) return
+                var isSignal = value.indexOf("sig\t") === 0 || value.indexOf("signal ") === 0
+                if (!isSignal) return
 
-            if (value.indexOf("/mprisremote") !== -1 || value.indexOf("org.kde.kdeconnect.device.mprisremote") !== -1) {
-                mediaDebounceTimer.restart()
-                return
-            }
+                if (value.indexOf("/mprisremote") !== -1 || value.indexOf("org.kde.kdeconnect.device.mprisremote") !== -1) {
+                    mediaDebounceTimer.restart()
+                    return
+                }
 
-            if (value.indexOf("/battery") !== -1 ||
-                value.indexOf("/connectivity_report") !== -1 ||
-                value.indexOf("org.kde.kdeconnect.device.battery") !== -1 ||
-                value.indexOf("org.kde.kdeconnect.device.connectivity_report") !== -1 ||
-                value.indexOf("org.kde.kdeconnect.device") !== -1 ||
-                value.indexOf("org.kde.kdeconnect.daemon") !== -1 ||
-                value.indexOf("deviceAdded") !== -1 ||
-                value.indexOf("deviceRemoved") !== -1 ||
-                value.indexOf("deviceVisibilityChanged") !== -1 ||
-                value.indexOf("reachableChanged") !== -1 ||
-                value.indexOf("pairStateChanged") !== -1 ||
-                value.indexOf("chargeChanged") !== -1) {
-                dbusDebounceTimer.restart()
+                if (value.indexOf("/battery") !== -1 ||
+                    value.indexOf("/connectivity_report") !== -1 ||
+                    value.indexOf("org.kde.kdeconnect.device.battery") !== -1 ||
+                    value.indexOf("org.kde.kdeconnect.device.connectivity_report") !== -1 ||
+                    value.indexOf("org.kde.kdeconnect.device") !== -1 ||
+                    value.indexOf("org.kde.kdeconnect.daemon") !== -1 ||
+                    value.indexOf("deviceAdded") !== -1 ||
+                    value.indexOf("deviceRemoved") !== -1 ||
+                    value.indexOf("deviceVisibilityChanged") !== -1 ||
+                    value.indexOf("reachableChanged") !== -1 ||
+                    value.indexOf("pairStateChanged") !== -1 ||
+                    value.indexOf("chargeChanged") !== -1) {
+                    dbusDebounceTimer.restart()
+                }
             }
-        } }
+        }
         onExited: {
             signalRestart.interval = Math.min(30000, 1000 * Math.pow(2, monitorRestartCount))
             monitorRestartCount += 1
@@ -1361,8 +1402,35 @@ Item {
         }
     }
 
-    Timer { id: signalRestart; repeat: false; onTriggered: if (!signalProcess.running) signalProcess.running = true }
-    Timer { interval: 15000; running: !signalProcess.running; repeat: true; onTriggered: root.refresh() }
-    Component.onCompleted: { root.refresh(); root.refreshTailscale(); signalProcess.running = true }
-    Component.onDestruction: { actionDismissTimer.stop(); fileTransferDismissTimer.stop(); dbusDebounceTimer.stop(); mediaDebounceTimer.stop(); pairingWatchdogTimer.stop(); monitorStabilityTimer.stop(); signalRestart.stop(); signalProcess.running = false; scanProcess.running = false; commandsProcess.running = false; actionProcess.running = false; fileTransferProcess.running = false; pairProcess.running = false; pairResponseProcess.running = false; filePickerProcess.running = false; tailscaleProcess.running = false; addressProcess.running = false; firewallProcess.running = false; installProcess.running = false; appProcess.running = false; mediaStatusProcess.running = false; mediaActionProcess.running = false; mediaPlayerProcess.running = false }
+    Component.onCompleted: {
+        root.refresh()
+        root.refreshTailscale()
+        signalProcess.running = true
+    }
+
+    Component.onDestruction: {
+        actionDismissTimer.stop()
+        fileTransferDismissTimer.stop()
+        dbusDebounceTimer.stop()
+        mediaDebounceTimer.stop()
+        pairingWatchdogTimer.stop()
+        monitorStabilityTimer.stop()
+        signalRestart.stop()
+        signalProcess.running = false
+        scanProcess.running = false
+        commandsProcess.running = false
+        actionProcess.running = false
+        fileTransferProcess.running = false
+        pairProcess.running = false
+        pairResponseProcess.running = false
+        filePickerProcess.running = false
+        tailscaleProcess.running = false
+        addressProcess.running = false
+        firewallProcess.running = false
+        installProcess.running = false
+        appProcess.running = false
+        mediaStatusProcess.running = false
+        mediaActionProcess.running = false
+        mediaPlayerProcess.running = false
+    }
 }

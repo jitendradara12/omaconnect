@@ -29,7 +29,9 @@ Column {
     readonly property var playerList: (media && Array.isArray(media.playerList)) ? media.playerList : []
     readonly property string albumArt: (media && media.albumArt) ? media.albumArt : ""
 
-    PanelSeparator { foreground: root.foreground }
+    PanelSeparator {
+        foreground: root.foreground
+    }
 
     CursorSurface {
         id: collapsedBar

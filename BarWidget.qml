@@ -11,12 +11,6 @@ BarWidget {
     id: root
     moduleName: "omaconnect"
 
-    // Primary path: the bar host's scoped facade (service-capable under the
-    // first-party bar). Fallback: the engine-wide bridge singleton -- under
-    // replacement bars the facade's serviceFor() is a deliberate null stub,
-    // so widgets they host would otherwise never see the service. The
-    // binding re-evaluates on its own when the service publishes (or is
-    // torn down). See bridge/Bridge.qml.
     readonly property var service: {
         var viaHost = bar && bar.shell && typeof bar.shell.serviceFor === "function"
             ? bar.shell.serviceFor("omaconnect") : null
@@ -27,6 +21,14 @@ BarWidget {
     readonly property bool hasBattery: !!(device && device.reachable && device.capabilities && device.capabilities.battery && device.battery >= 0)
     readonly property bool showBarBattery: !!(root.settings && root.settings.showBarBattery && root.hasBattery)
     readonly property Item button: buttonItem
+    readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+    readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
+
+    implicitWidth: buttonItem.implicitWidth
+    implicitHeight: barSize
+
+    onBarChanged: injectPanel()
+    onSettingsChanged: injectPanel()
 
     function injectPanel() {
         var target = panelLoader.item
@@ -45,8 +47,6 @@ BarWidget {
         toggle()
     }
 
-    readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
-
     function open() {
         if (panelLoader.item && panelLoader.item.open) panelLoader.item.open()
     }
@@ -55,17 +55,9 @@ BarWidget {
         if (panelLoader.item && panelLoader.item.close) panelLoader.item.close()
     }
 
-    readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
-
     function closeForPopoutSwitch() {
         if (panelLoader.item && panelLoader.item.closeForPopoutSwitch) panelLoader.item.closeForPopoutSwitch()
     }
-
-    implicitWidth: buttonItem.implicitWidth
-    implicitHeight: barSize
-
-    onBarChanged: injectPanel()
-    onSettingsChanged: injectPanel()
 
     BarIconButton {
         id: buttonItem

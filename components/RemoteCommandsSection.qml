@@ -28,6 +28,7 @@ Column {
     Row {
         width: parent.width
         spacing: Style.space(6)
+
         CursorSurface {
             width: Math.max(1, parent.width - (panel.commandsExpanded ? refreshCmdBtn.implicitWidth + Style.space(6) : 0))
             implicitHeight: headerRow.implicitHeight + Style.space(6)
@@ -36,6 +37,7 @@ Column {
             foreground: root.foreground
             fill: Style.hoverFillFor(root.foreground, Color.accent)
             currentFill: Style.selectedFillFor(root.foreground, Color.accent)
+
             MouseArea {
                 anchors.fill: parent
                 hoverEnabled: true
@@ -45,11 +47,13 @@ Column {
                 }
                 onClicked: panel.toggleCommandsExpanded()
             }
+
             Row {
                 id: headerRow
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(6)
+
                 Text {
                     text: panel.commandsExpanded ? "󰅀" : "󰅂"
                     color: root.foreground
@@ -57,6 +61,7 @@ Column {
                     font.pixelSize: Style.font.caption
                     anchors.verticalCenter: parent.verticalCenter
                 }
+
                 PanelSectionHeader {
                     text: "REMOTE COMMANDS"
                     foreground: root.foreground
@@ -65,6 +70,7 @@ Column {
                 }
             }
         }
+
         PanelActionButton {
             id: refreshCmdBtn
             visible: panel.commandsExpanded
@@ -81,6 +87,7 @@ Column {
         visible: panel.commandsExpanded
         width: parent.width
         spacing: Style.space(6)
+
         Text {
             visible: !!root.service && root.service.commandsLoading
             text: "Loading commands..."
@@ -88,6 +95,7 @@ Column {
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
         }
+
         Text {
             visible: !!root.service && !root.service.commandsLoading && (!root.service.remoteCommands || root.service.remoteCommands.length === 0)
             text: "No remote commands configured"
@@ -95,27 +103,32 @@ Column {
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
         }
+
         Repeater {
             model: root.service ? root.service.remoteCommands : []
             delegate: CursorSurface {
+                id: cmdSurface
                 required property var modelData
                 required property int index
+
                 width: parent.width
                 implicitHeight: cmdRow.implicitHeight + Style.space(8)
                 hasCursor: panel.cursorActive && panel.focusSection === "commands" && panel.commandsExpanded && panel.commandSelectedIndex === index
                 foreground: root.foreground
                 fill: Style.hoverFillFor(root.foreground, Color.accent)
                 currentFill: Style.selectedFillFor(root.foreground, Color.accent)
+
                 MouseArea {
                     anchors.fill: parent
                     hoverEnabled: true
                     onEntered: {
                         panel.cursorActive = true
                         panel.focusSection = "commands"
-                        panel.commandSelectedIndex = index
+                        panel.commandSelectedIndex = cmdSurface.index
                     }
-                    onClicked: if (root.service && root.device && modelData) root.service.executeRemoteCommand(root.device.id, modelData.key)
+                    onClicked: if (root.service && root.device && cmdSurface.modelData) root.service.executeRemoteCommand(root.device.id, cmdSurface.modelData.key)
                 }
+
                 Row {
                     id: cmdRow
                     anchors.left: parent.left
@@ -135,7 +148,7 @@ Column {
 
                     Text {
                         id: cmdBtnText
-                        text: modelData ? modelData.name : ""
+                        text: cmdSurface.modelData ? cmdSurface.modelData.name : ""
                         color: root.foreground
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.bodySmall
