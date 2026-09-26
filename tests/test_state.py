@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import time
 import subprocess
 import tempfile
 import unittest
@@ -7,6 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).parents[1]
+BASH = shutil.which("bash") or "bash"
 
 
 def parse_device(line):
@@ -565,7 +568,9 @@ class PairingState:
         return True
 
 
-class StateTests(unittest.TestCase):
+
+
+class DeviceParsingAndFormattingTests(unittest.TestCase):
   def test_authoritative_snapshot_is_stable_and_capability_aware(self):
     # Full capability set
     full_line = "DEVICE\tdev-full\tFull Phone\tphone\ttrue\ttrue\t100\ttrue\tkdeconnect_battery,kdeconnect_ping,kdeconnect_share,kdeconnect_runcommand,kdeconnect_findmyphone,kdeconnect_clipboard,kdeconnect_connectivity_report,kdeconnect_sms,kdeconnect_mprisremote\t5G\t4"
@@ -607,8 +612,6 @@ class StateTests(unittest.TestCase):
         "capabilities": {"battery": True, "ping": True, "ring": False, "text": True, "clipboard": False, "file": True, "commands": False, "network": False, "sms": False, "media": False, "pair": True},
     })
 
-
-
   def test_pairing_metadata_is_parsed_for_incoming_requests(self):
     line = "DEVICE\tdev-1\tPhone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_ping\t\t-1\ttrue\ttrue\t82C4DD3C"
     device = parse_device(line)
@@ -633,6 +636,122 @@ class StateTests(unittest.TestCase):
     self.assertFalse(d_offline["reachable"])
     self.assertEqual(format_overview_status(d_offline), "Paired, offline")
 
+  def test_device_type_icon_mapping_and_defaults(self):
+    self.assertEqual(device_type_icon("phone"), "󰄜")
+    self.assertEqual(device_type_icon("tablet"), "󰓹")
+    self.assertEqual(device_type_icon("laptop"), "󰌢")
+    self.assertEqual(device_type_icon("desktop"), "󰍹")
+    self.assertEqual(device_type_icon("tv"), "󰵔")
+    self.assertEqual(device_type_icon("unknown"), "󰄜")
+    self.assertEqual(device_type_icon(""), "󰄜")
+    self.assertEqual(device_type_icon(None), "󰄜")
+
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    self.assertIn("function deviceTypeIcon(type)", controller_source)
+    service_source = (ROOT / "Service.qml").read_text()
+    self.assertIn("function deviceTypeIcon(type)", service_source)
+
+  def test_settings_action_filtering(self):
+    full_line = "DEVICE\tdev-full\tFull Phone\tphone\ttrue\ttrue\t100\ttrue\tkdeconnect_battery,kdeconnect_ping,kdeconnect_share,kdeconnect_findmyphone,kdeconnect_clipboard,kdeconnect_sms\t5G\t4"
+    dev = parse_device(full_line)
+
+    # Ping is disabled by default
+    default_acts = compute_available_actions(dev, {})
+    self.assertEqual(default_acts, ["ring", "clipboard", "file", "sms", "text"])
+
+    # Explicitly enable ping
+    all_acts = compute_available_actions(dev, {"showActionPing": True})
+    self.assertEqual(all_acts, ["ring", "clipboard", "file", "sms", "ping", "text"])
+
+    # Disable SMS with ping enabled
+    filtered_acts = compute_available_actions(dev, {"showActionSms": False, "showActionPing": True})
+    self.assertEqual(filtered_acts, ["ring", "clipboard", "file", "ping", "text"])
+
+    # Disable ring and clipboard
+    filtered_acts2 = compute_available_actions(dev, {"showActionRing": False, "showActionClipboard": False})
+    self.assertEqual(filtered_acts2, ["file", "sms", "text"])
+
+    panel_source = (ROOT / "Panel.qml").read_text()
+    self.assertIn("root.getSetting(\"showActionRing\", true)", panel_source)
+    self.assertIn("root.getSetting(\"showActionClipboard\", true)", panel_source)
+    self.assertIn("root.getSetting(\"showActionFile\", true)", panel_source)
+    self.assertIn("root.getSetting(\"showActionSms\", true)", panel_source)
+    self.assertIn("root.getSetting(\"showActionPing\", false)", panel_source)
+    self.assertIn("root.getSetting(\"showActionText\", true)", panel_source)
+
+  def test_settings_telemetry_filtering(self):
+    full_line = "DEVICE\tdev-full\tFull Phone\tphone\ttrue\ttrue\t85\ttrue\tkdeconnect_battery,kdeconnect_connectivity_report\tLTE\t3"
+    dev = parse_device(full_line)
+
+    # Full stats
+    self.assertEqual(format_battery_status(dev, show_battery=True, show_network=True), "85% • Charging • LTE (3/4)")
+
+    # Battery only
+    self.assertEqual(format_battery_status(dev, show_battery=True, show_network=False), "85% • Charging")
+
+    # Network only
+    self.assertEqual(format_battery_status(dev, show_battery=False, show_network=True), "LTE (3/4)")
+
+    # Neither
+    self.assertEqual(format_battery_status(dev, show_battery=False, show_network=False), "")
+
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    self.assertIn("function deviceBatteryText(device, showBattery, showNetwork)", controller_source)
+
+  def test_available_actions_computation_and_gating(self):
+    def available_actions_for(device):
+        if not device or not device.get("paired") or not device.get("reachable"):
+            return []
+        caps = device.get("capabilities", {})
+        res = []
+        if caps.get("ring"):
+            res.append("ring")
+        if caps.get("clipboard"):
+            res.append("clipboard")
+        if caps.get("file"):
+            res.append("file")
+        if caps.get("ping"):
+            res.append("ping")
+        if caps.get("text"):
+            res.append("text")
+        return res
+
+    full_dev = parse_device("DEVICE\tdev-full\tPhone\tphone\ttrue\ttrue\t100\ttrue\tkdeconnect_battery,kdeconnect_ping,kdeconnect_share,kdeconnect_runcommand,kdeconnect_findmyphone,kdeconnect_clipboard")
+    self.assertEqual(available_actions_for(full_dev), ["ring", "clipboard", "file", "ping", "text"])
+
+    part_dev = parse_device("DEVICE\tdev-part\tPhone\tphone\ttrue\ttrue\t50\tfalse\tkdeconnect_findmyphone,kdeconnect_clipboard")
+    self.assertEqual(available_actions_for(part_dev), ["ring", "clipboard"])
+
+    offline_dev = parse_device("DEVICE\tdev-off\tPhone\tphone\ttrue\tfalse\t50\tfalse\tkdeconnect_findmyphone,kdeconnect_clipboard")
+    self.assertEqual(available_actions_for(offline_dev), [])
+
+    unpaired_dev = parse_device("DEVICE\tdev-unpaired\tPhone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
+    self.assertEqual(available_actions_for(unpaired_dev), [])
+
+  def test_media_player_capability_detection(self):
+    dev_with_mpris = parse_device("DEVICE\tdev-1\tPhone\tphone\ttrue\ttrue\t80\ttrue\tkdeconnect_battery,kdeconnect_mprisremote")
+    self.assertTrue(dev_with_mpris["capabilities"]["media"])
+
+    dev_with_control = parse_device("DEVICE\tdev-2\tLaptop\tlaptop\ttrue\ttrue\t90\tfalse\tkdeconnect_mpriscontrol")
+    self.assertTrue(dev_with_control["capabilities"]["media"])
+
+    dev_without_media = parse_device("DEVICE\tdev-3\tTablet\ttablet\ttrue\ttrue\t60\tfalse\tkdeconnect_battery,kdeconnect_ping")
+    self.assertFalse(dev_without_media["capabilities"]["media"])
+
+    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
+    self.assertIn("kdeconnect_mprisremote", discovery_source)
+    self.assertIn("kdeconnect_mpriscontrol", discovery_source)
+
+  def test_unreachable_device_suppresses_battery_display(self):
+    offline_device = parse_device("DEVICE\tdev-off\tPhone\tphone\ttrue\tfalse\t80\ttrue\tkdeconnect_battery")
+    self.assertEqual(format_battery_status(offline_device), "")
+
+    device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertIn("root.device.reachable", device_section)
+
+
+
+class ActionAndComposerTests(unittest.TestCase):
   def test_send_file_unusual_paths_and_safety(self):
     cmd_decoded = build_action_command("file", "dev-1", "file:///home/user/my%20documents/file.pdf")
     self.assertEqual(cmd_decoded, ["kdeconnect-cli", "-d", "dev-1", "--share", "/home/user/my documents/file.pdf"])
@@ -797,6 +916,21 @@ class StateTests(unittest.TestCase):
     self.assertEqual(state.action_error, "ping unavailable")
     self.assertEqual(state.action_message, "")
 
+  def test_stale_completion_is_ignored(self):
+    self.assertFalse(accept_completion(4, 5, "old", "old"))
+    self.assertFalse(accept_completion(5, 5, "old", "new"))
+    self.assertTrue(accept_completion(5, 5, "new", "new"))
+
+  def test_conflicting_pair_unpair_actions_blocked(self):
+    dev = parse_device("DEVICE\tdev-1\tPhone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
+    state = PairingState(devices=[dev])
+    state.pair_device("dev-1")
+    self.assertFalse(state.pair_device("dev-1"))
+    self.assertFalse(state.request_unpair_confirm("dev-1"))
+
+
+
+class RemoteCommandsStateTests(unittest.TestCase):
   def test_empty_command_output_is_a_valid_empty_list(self):
     self.assertEqual(json.loads("[]"), [])
 
@@ -809,471 +943,6 @@ class StateTests(unittest.TestCase):
     self.assertEqual(categorize(3, "pairing"), "pairing timed out")
     self.assertEqual(categorize(3, "remote command"), "remote command timed out")
     self.assertNotIn("stderr", categorize(1, "action"))
-
-  def test_pairing_success_transition_and_local_acceptance(self):
-    unpaired_dev = parse_device("DEVICE\tdev-1\tNearby Phone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery,kdeconnect_ping")
-    state = PairingState(devices=[unpaired_dev])
-    self.assertTrue(state.pair_device("dev-1"))
-    self.assertEqual(state.pending_pairing["dev-1"], "requesting")
-    self.assertEqual(state.action_state, "accepted")
-    self.assertEqual(state.action_message, "Pair request sent")
-    self.assertEqual(state.action_error, "")
-
-    completed = state.handle_pair_process_completed(state.generation, "dev-1", 0, is_pair=True)
-    self.assertTrue(completed)
-    self.assertEqual(state.pending_pairing["dev-1"], "requesting")
-    self.assertEqual(state.action_message, "Pair request sent")
-
-    state.apply_scan([
-        "DEVICE\tdev-1\tNearby Phone\tphone\ttrue\ttrue\t-1\tfalse\tkdeconnect_battery,kdeconnect_ping"
-    ], state.generation)
-    self.assertNotIn("dev-1", state.pending_pairing)
-    self.assertEqual(state.action_message, "Device paired")
-
-  def test_pairing_rejection_and_timeout_error_categorization(self):
-    unpaired_dev = parse_device("DEVICE\tdev-1\tNearby Phone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
-    state = PairingState(devices=[unpaired_dev])
-
-    # Rejection (exit code 2)
-    state.pair_device("dev-1")
-    state.handle_pair_process_completed(state.generation, "dev-1", 2, is_pair=True)
-    self.assertNotIn("dev-1", state.pending_pairing)
-    self.assertEqual(state.action_state, "failed")
-    self.assertEqual(state.action_error, "Pairing timed out or rejected")
-
-    # Timeout (exit code 3)
-    state.pair_device("dev-1")
-    state.handle_pair_process_completed(state.generation, "dev-1", 3, is_pair=True)
-    self.assertNotIn("dev-1", state.pending_pairing)
-    self.assertEqual(state.action_state, "failed")
-    self.assertEqual(state.action_error, "Pairing timed out or rejected")
-
-    # Watchdog timeout trigger
-    state.pair_device("dev-1")
-    state.handle_timeout("dev-1")
-    self.assertNotIn("dev-1", state.pending_pairing)
-    self.assertEqual(state.action_state, "failed")
-    self.assertEqual(state.action_error, "Pairing timed out or rejected")
-
-  def test_stale_pairing_cleanup_on_refresh(self):
-    unpaired_dev = parse_device("DEVICE\tdev-1\tNearby Phone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
-    state = PairingState(devices=[unpaired_dev])
-
-    # Pair requested at timestamp 1000
-    state.pair_device("dev-1", timestamp=1000)
-    self.assertEqual(state.pending_pairing.get("dev-1"), "requesting")
-
-    # Refresh at timestamp 5000 (<10s) -> still requesting
-    state.refresh(force_network=True, current_time=5000)
-    self.assertEqual(state.pending_pairing.get("dev-1"), "requesting")
-
-    # Refresh at timestamp 12000 (>10s) -> stale request cleared
-    state.refresh(force_network=True, current_time=12000)
-    self.assertNotIn("dev-1", state.pending_pairing)
-
-  def test_inline_destructive_unpairing_confirmation_and_cancellation(self):
-    paired_dev = parse_device("DEVICE\tdev-1\tMy Phone\tphone\ttrue\ttrue\t80\tfalse\tkdeconnect_battery")
-    state = PairingState(devices=[paired_dev])
-
-    # Request confirmation
-    self.assertTrue(state.request_unpair_confirm("dev-1"))
-    self.assertEqual(state.unpair_confirming_id, "dev-1")
-    self.assertEqual(state.pending_pairing["dev-1"], "unpair_confirm")
-
-    # Cancel confirmation
-    state.cancel_unpair_confirm("dev-1")
-    self.assertEqual(state.unpair_confirming_id, "")
-    self.assertNotIn("dev-1", state.pending_pairing)
-
-    # Request again and confirm
-    state.request_unpair_confirm("dev-1")
-    self.assertTrue(state.confirm_unpair("dev-1"))
-    self.assertEqual(state.pending_pairing["dev-1"], "removing")
-    self.assertEqual(state.action_message, "Device unpaired")
-
-    # Exit code 1 (failure)
-    state.handle_pair_process_completed(state.generation, "dev-1", 1, is_pair=False)
-    self.assertEqual(state.pending_pairing["dev-1"], "failed")
-    self.assertEqual(state.action_error, "unpairing failed")
-
-  def test_conflicting_pair_unpair_actions_blocked(self):
-    dev = parse_device("DEVICE\tdev-1\tPhone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
-    state = PairingState(devices=[dev])
-    state.pair_device("dev-1")
-    self.assertFalse(state.pair_device("dev-1"))
-    self.assertFalse(state.request_unpair_confirm("dev-1"))
-
-  def test_selection_and_keyboard_cursor_retention_on_state_changes(self):
-    dev1 = parse_device("DEVICE\tdev-1\tPhone One\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
-    dev2 = parse_device("DEVICE\tdev-2\tPhone Two\tphone\ttrue\ttrue\t90\tfalse\tkdeconnect_battery")
-    state = PairingState(devices=[dev1, dev2], selected_device_id="dev-2")
-
-    state.apply_scan([
-        "DEVICE\tdev-2\tPhone Two\tphone\tfalse\ttrue\t90\tfalse\tkdeconnect_battery",
-        "DEVICE\tdev-1\tPhone One\tphone\ttrue\ttrue\t-1\tfalse\tkdeconnect_battery"
-    ], state.generation)
-
-    self.assertEqual(state.selected_device_id, "dev-2")
-
-  def test_multi_device_pairing_watchdog_isolation(self):
-    dev1 = parse_device("DEVICE\tdev-1\tPhone One\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery,kdeconnect_ping")
-    dev2 = parse_device("DEVICE\tdev-2\tPhone Two\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery,kdeconnect_ping")
-    state = PairingState(devices=[dev1, dev2], selected_device_id="dev-1")
-
-    self.assertTrue(state.pair_device("dev-1", timestamp=1000))
-    self.assertEqual(state.pending_pairing.get("dev-1"), "requesting")
-    self.assertEqual(state.pairing_request_times.get("dev-1"), 1000)
-
-    state.select_device("dev-2")
-    self.assertTrue(state.pair_device("dev-2", timestamp=20000))
-    self.assertEqual(state.pending_pairing.get("dev-2"), "requesting")
-    self.assertEqual(state.pairing_request_times.get("dev-2"), 20000)
-
-    timed_out = state.check_watchdog(30000)
-    self.assertEqual(timed_out, [])
-    self.assertEqual(state.pending_pairing.get("dev-1"), "requesting")
-    self.assertEqual(state.pending_pairing.get("dev-2"), "requesting")
-
-    timed_out = state.check_watchdog(32000)
-    self.assertEqual(timed_out, ["dev-1"])
-    self.assertNotIn("dev-1", state.pending_pairing)
-    self.assertEqual(state.pending_pairing.get("dev-2"), "requesting")
-
-    state.select_device("dev-2")
-    timed_out2 = state.check_watchdog(51000)
-    self.assertEqual(timed_out2, ["dev-2"])
-    self.assertNotIn("dev-2", state.pending_pairing)
-    self.assertEqual(state.action_state, "failed")
-    self.assertEqual(state.action_error, "Pairing timed out or rejected")
-
-  def test_pairing_contracts(self):
-    source = (ROOT / "KdeConnectController.qml").read_text()
-    self.assertIn("setPendingPairing", source)
-    self.assertIn("pairDevice", source)
-    self.assertIn("unpairDevice", source)
-    self.assertIn('"Pair request sent"', source)
-    self.assertIn('"Device paired"', source)
-    self.assertIn('"Device unpaired"', source)
-    self.assertIn('"Pairing timed out or rejected"', source)
-    self.assertIn("pairingWatchdogTimer", source)
-    self.assertIn("root.pairingRequestTimes[devId]", source)
-    self.assertIn("now - reqTime >= 30000", source)
-
-    ui_source = (ROOT / "Panel.qml").read_text() + "\n" + "\n".join(p.read_text() for p in (ROOT / "components").glob("*.qml"))
-    self.assertIn("unpairConfirmingId", ui_source)
-    self.assertIn("requestUnpairConfirm", ui_source)
-    self.assertIn("cancelUnpairConfirm", ui_source)
-    self.assertIn("confirmUnpair", ui_source)
-    self.assertIn("devicePendingState", ui_source)
-    self.assertIn("isUnpairConfirming", ui_source)
-
-  def test_stale_completion_is_ignored(self):
-    self.assertFalse(accept_completion(4, 5, "old", "old"))
-    self.assertFalse(accept_completion(5, 5, "old", "new"))
-    self.assertTrue(accept_completion(5, 5, "new", "new"))
-
-  def test_manifest_and_runtime_shape(self):
-    manifest = json.loads((ROOT / "manifest.json").read_text())
-    self.assertEqual(manifest["entryPoints"], {"service": "Service.qml", "barWidget": "BarWidget.qml"})
-    self.assertFalse((ROOT / "main.qml").exists())
-    self.assertTrue((ROOT / "Panel.qml").exists())
-    self.assertTrue(any((ROOT / "components").rglob("*.qml")))
-
-  def test_tailscale_and_custom_address_contracts(self):
-    controller = (ROOT / "KdeConnectController.qml").read_text()
-    discovery = (ROOT / "scripts" / "discover_devices.sh").read_text()
-    network_ui = (ROOT / "components" / "NetworkSection.qml").read_text()
-    address_script = (ROOT / "scripts" / "update_custom_address.sh").read_text()
-
-    panel = (ROOT / "Panel.qml").read_text()
-    bar_widget = (ROOT / "BarWidget.qml").read_text()
-
-    self.assertIn('tailscale status --json', controller)
-    self.assertIn('function parseTailscaleStatus(output)', controller)
-    self.assertIn('function addCustomAddress(address)', controller)
-    self.assertIn('customAddressesReady', controller)
-    self.assertIn('getAddressScriptPath()', controller)
-    self.assertIn('customDevices as', address_script)
-    self.assertIn('Properties.Get', address_script)
-    self.assertIn('set-property', address_script)
-    self.assertIn('CUSTOM_ADDRESSES_READY', discovery)
-    self.assertIn('CUSTOM_ADDRESS\\t%s', discovery)
-    self.assertIn('Search peers or enter IP', network_ui)
-    self.assertIn('SAVED ADDRESSES', network_ui)
-    self.assertIn('panel.networkExpanded', network_ui)
-    self.assertIn('property bool networkExpanded', panel)
-    self.assertIn('function toggleNetworkExpanded', panel)
-    self.assertIn('showBarBattery', bar_widget)
-
-  def test_custom_address_update_merges_with_authoritative_dbus_state(self):
-    with tempfile.TemporaryDirectory() as tmp:
-      stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text("#!/usr/bin/env bash\nprintf \"(<['100.64.0.1']>,)\\n\"\n")
-      gdbus.chmod(0o755)
-      busctl = stub_dir / "busctl"
-      busctl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\"\n")
-      busctl.chmod(0o755)
-
-      result = subprocess.run(
-          ["bash", str(ROOT / "scripts" / "update_custom_address.sh"), "add", "100.64.0.2"],
-          capture_output=True,
-          text=True,
-          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
-      )
-
-    self.assertEqual(result.returncode, 0, result)
-    self.assertIn("customDevices as 2 100.64.0.1 100.64.0.2", result.stdout)
-
-  def test_incoming_pairing_contracts(self):
-    controller = (ROOT / "KdeConnectController.qml").read_text()
-    ui = (ROOT / "components" / "DeviceSection.qml").read_text()
-    self.assertIn('isPairRequestedByPeer', (ROOT / "scripts" / "discover_devices.sh").read_text())
-    self.assertIn('function acceptPairing(id)', controller)
-    self.assertIn('org.kde.kdeconnect.device.acceptPairing', controller)
-    self.assertIn('function rejectPairing(id)', controller)
-    self.assertIn('org.kde.kdeconnect.device.cancelPairing', controller)
-    self.assertIn('Verify on both devices', ui)
-
-  def test_service_forwards_all_controller_actions(self):
-    service_source = (ROOT / "Service.qml").read_text()
-    self.assertIn("openSmsApp", service_source)
-    self.assertIn("controller.openSmsApp", service_source)
-    self.assertIn("openKdeConnectApp", service_source)
-    self.assertIn("controller.openKdeConnectApp", service_source)
-    self.assertIn("configureFirewall", service_source)
-    self.assertIn("controller.configureFirewall", service_source)
-    self.assertIn("setPendingPairing", service_source)
-    self.assertIn("deviceNetworkIcon", service_source)
-    self.assertIn("refreshTailscale", service_source)
-    self.assertIn("addCustomAddress", service_source)
-    self.assertIn("acceptPairing", service_source)
-
-  def test_open_kdeconnect_app_contract(self):
-    controller_source = (ROOT / "KdeConnectController.qml").read_text()
-    device_ui = (ROOT / "components" / "DeviceSection.qml").read_text()
-    app_script = (ROOT / "scripts" / "open_app.sh").read_text()
-
-    self.assertIn("function openKdeConnectApp()", controller_source)
-    self.assertIn("getAppScriptPath()", controller_source)
-    self.assertIn("openKdeConnectApp()", device_ui)
-    self.assertIn("Open KDE Connect application", device_ui)
-    self.assertIn("kdeconnect-app", app_script)
-
-  def test_confirming_unpair_cannot_follow_a_device_switch(self):
-    class UnpairStateMachine:
-        def __init__(self):
-            self.selected_device_id = "dev-1"
-            self.unpair_confirming_id = ""
-            self.unpaired = []
-
-        def select_device(self, dev_id):
-            if self.unpair_confirming_id and self.unpair_confirming_id != dev_id:
-                self.cancel_unpair_confirm(self.unpair_confirming_id)
-            self.selected_device_id = dev_id
-
-        def request_unpair_confirm(self, dev_id):
-            if self.unpair_confirming_id and self.unpair_confirming_id != dev_id:
-                self.cancel_unpair_confirm(self.unpair_confirming_id)
-            self.unpair_confirming_id = dev_id
-
-        def cancel_unpair_confirm(self, dev_id):
-            if not dev_id or self.unpair_confirming_id == dev_id:
-                self.unpair_confirming_id = ""
-
-        def confirm_unpair(self, dev_id):
-            if self.unpair_confirming_id and self.unpair_confirming_id != dev_id:
-                return
-            self.unpair_confirming_id = ""
-            self.unpaired.append(dev_id)
-
-    sm = UnpairStateMachine()
-    sm.request_unpair_confirm("dev-1")
-    self.assertEqual(sm.unpair_confirming_id, "dev-1")
-    sm.select_device("dev-2")
-    self.assertEqual(sm.unpair_confirming_id, "")
-
-    sm.request_unpair_confirm("dev-1")
-    sm.confirm_unpair("dev-2")
-    self.assertEqual(sm.unpaired, [])
-    self.assertEqual(sm.unpair_confirming_id, "dev-1")
-
-    sm.confirm_unpair("dev-1")
-    self.assertEqual(sm.unpaired, ["dev-1"])
-    self.assertEqual(sm.unpair_confirming_id, "")
-
-    panel_source = (ROOT / "Panel.qml").read_text()
-    self.assertIn("unpairConfirmingId", panel_source)
-    self.assertIn("confirmUnpair", panel_source)
-    self.assertIn("cancelUnpairConfirm", panel_source)
-
-  def test_scan_and_picker_lifecycle_guards(self):
-    controller_source = (ROOT / "KdeConnectController.qml").read_text()
-    self.assertIn("function clearActionState()", controller_source)
-    self.assertIn("filePickerProcess.running", controller_source)
-
-  def test_discovery_property_failures_and_fields_are_sanitized(self):
-    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
-    self.assertIn("|| return 69", discovery_source)
-    self.assertIn("sanitize_field()", discovery_source)
-    self.assertIn("field=${field//$'\\t'/ }", discovery_source)
-
-  def test_discovery_accepts_typed_empty_device_array(self):
-    with tempfile.TemporaryDirectory() as tmp:
-      stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text(
-          "#!/usr/bin/env bash\n"
-          "if [[ \"$*\" == *NameHasOwner* ]]; then\n"
-          "  printf '(true,)\\n'\n"
-          "else\n"
-          "  printf '(@as [],)\\n'\n"
-          "fi\n"
-      )
-      gdbus.chmod(0o755)
-      kdeconnect_cli = stub_dir / "kdeconnect-cli"
-      kdeconnect_cli.write_text("#!/usr/bin/env bash\nexit 0\n")
-      kdeconnect_cli.chmod(0o755)
-
-      result = subprocess.run(
-          ["bash", str(ROOT / "scripts" / "discover_devices.sh")],
-          capture_output=True,
-          text=True,
-          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
-      )
-
-      self.assertEqual(result.returncode, 0, result)
-      self.assertEqual(result.stdout, "CUSTOM_ADDRESSES_READY\n")
-
-  def test_sms_launcher_reports_missing_command(self):
-    sms_source = (ROOT / "scripts" / "open_sms.sh").read_text()
-    self.assertIn("command -v kdeconnect-sms", sms_source)
-    self.assertIn("exit 127", sms_source)
-
-
-  def test_no_privacy_product_claims_or_ui_processes(self):
-    self.assertNotIn("Process {", (ROOT / "BarWidget.qml").read_text())
-
-  def test_media_status_update_references_process_ids_directly(self):
-    import re
-    controller_source = (ROOT / "KdeConnectController.qml").read_text()
-    # QML child ids are in component scope but are NOT properties of the root
-    # item: `root.<processId>` resolves to undefined, so reading `.running`
-    # off it throws and the surrounding try/catch wipes mediaState to empty.
-    # Process ids must be referenced bare, like every other Process use here.
-    bad_refs = re.findall(r"root\.\w*Process\b", controller_source)
-    self.assertEqual(bad_refs, [], f"root-qualified Process id refs: {bad_refs}")
-    self.assertIn("mediaActionProcess.running", controller_source)
-
-
-  def test_shell_script_is_not_needed_for_file_sharing(self):
-    self.assertFalse((ROOT / "scripts" / "share_file.sh").exists())
-
-  def test_no_file_dialog_and_process_file_picker_contract(self):
-    sources = "\n".join(path.read_text() for path in ROOT.glob("*.qml"))
-    self.assertNotIn("QtQuick.Dialogs", sources)
-    self.assertNotIn("FileDialog {", sources)
-    controller_source = (ROOT / "KdeConnectController.qml").read_text()
-    self.assertIn("filePickerProcess", controller_source)
-    self.assertIn("getPickerScriptPath", controller_source)
-    picker_sh = (ROOT / "scripts" / "pick_file.sh").read_text()
-    self.assertIn("omarchy-menu-select", picker_sh)
-
-  def test_file_picker_bounds_option_list_and_skips_missing_roots(self):
-    with tempfile.TemporaryDirectory() as tmp:
-        home = Path(tmp)
-        (home / "Downloads").mkdir()
-        for index in range(400):
-            entry = home / "Downloads" / f"{'n' * 200}-{index:04d}.pdf"
-            entry.write_text("x")
-            os.utime(entry, (index, index))
-
-        # Shadow the real menu so the picker's option list lands on stdout.
-        stub_dir = home / ".local" / "bin"
-        stub_dir.mkdir(parents=True)
-        stub = stub_dir / "omarchy-menu-select"
-        stub.write_text("#!/usr/bin/env bash\ncat\n")
-        stub.chmod(0o755)
-
-        result = subprocess.run(
-            ["bash", str(ROOT / "scripts" / "pick_file.sh")],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "HOME": str(home), "OMARCHY_PATH": ""},
-        )
-
-    # Documents/Pictures/Videos are absent, which must not abort the picker.
-    self.assertEqual(result.returncode, 0)
-    options = result.stdout.splitlines()
-    self.assertTrue(options)
-    self.assertLess(len(options), 400)
-    self.assertLess(len(result.stdout.encode()), 128 * 1024)
-    self.assertTrue(options[0].endswith("-0399.pdf"))
-
-  def test_file_picker_supports_expanded_formats_and_desktop(self):
-    with tempfile.TemporaryDirectory() as tmp:
-      home = Path(tmp)
-      desktop = home / "Desktop"
-      desktop.mkdir()
-      downloads = home / "Downloads"
-      downloads.mkdir()
-
-      desktop_file = desktop / "presentation.pptx"
-      desktop_file.write_text("dummy")
-
-      (downloads / "song.mp3").write_text("dummy")
-      (downloads / "lossless.flac").write_text("dummy")
-      (downloads / "voice.m4a").write_text("dummy")
-      (downloads / "audio.opus").write_text("dummy")
-
-      (downloads / "document.docx").write_text("dummy")
-      (downloads / "data.xlsx").write_text("dummy")
-      (downloads / "table.csv").write_text("dummy")
-      (downloads / "notes.md").write_text("dummy")
-      (downloads / "book.epub").write_text("dummy")
-
-      (downloads / "archive.7z").write_text("dummy")
-      (downloads / "compressed.zst").write_text("dummy")
-      (downloads / "app.apk").write_text("dummy")
-
-      stub_dir = home / ".local" / "bin"
-      stub_dir.mkdir(parents=True)
-      stub = stub_dir / "omarchy-menu-select"
-      stub.write_text("#!/usr/bin/env bash\ncat\n")
-      stub.chmod(0o755)
-
-      result = subprocess.run(
-          ["bash", str(ROOT / "scripts" / "pick_file.sh")],
-          capture_output=True,
-          text=True,
-          env={**os.environ, "HOME": str(home), "OMARCHY_PATH": ""},
-      )
-
-      self.assertEqual(result.returncode, 0)
-      options = result.stdout.splitlines()
-      basenames = {Path(line).name for line in options}
-
-      expected = {
-          "presentation.pptx", "song.mp3", "lossless.flac", "voice.m4a",
-          "audio.opus", "document.docx", "data.xlsx", "table.csv",
-          "notes.md", "book.epub", "archive.7z", "compressed.zst", "app.apk"
-      }
-      for filename in expected:
-        self.assertIn(filename, basenames)
-
-      deep_dir = downloads / "a" / "b" / "c" / "d" / "e"
-      deep_dir.mkdir(parents=True)
-      (deep_dir / "hidden_too_deep.mp3").write_text("dummy")
-
-      result2 = subprocess.run(
-          ["bash", str(ROOT / "scripts" / "pick_file.sh")],
-          capture_output=True,
-          text=True,
-          env={**os.environ, "HOME": str(home), "OMARCHY_PATH": ""},
-      )
-      options2 = result2.stdout.splitlines()
-      basenames2 = {Path(line).name for line in options2}
-      self.assertNotIn("hidden_too_deep.mp3", basenames2)
 
   def test_remote_commands_unsupported_device(self):
     line = "DEVICE\tdev-unsupp\tPhone\tphone\ttrue\ttrue\t80\tfalse\tkdeconnect_ping,kdeconnect_share"
@@ -1449,512 +1118,157 @@ class StateTests(unittest.TestCase):
     self.assertTrue(state.commands_expanded)
     self.assertTrue(state.commands_loading)
 
-  def test_complete_panel_layout_and_action_navigation_contracts(self):
-    ui_source = (ROOT / "Panel.qml").read_text() + "\n" + "\n".join(p.read_text() for p in (ROOT / "components").glob("*.qml"))
-    self.assertIn("availableActions", ui_source)
-    self.assertIn("triggerAction", ui_source)
-    self.assertIn("actionSelectedIndex", ui_source)
-    self.assertIn("focusSection", ui_source)
-    self.assertIn("DEVICES", ui_source)
-    self.assertIn("ACTIONS", ui_source)
-    self.assertIn("REMOTE COMMANDS", ui_source)
-    self.assertIn("deviceOverviewStatus", ui_source)
-
-  def test_available_actions_computation_and_gating(self):
-    def available_actions_for(device):
-        if not device or not device.get("paired") or not device.get("reachable"):
-            return []
-        caps = device.get("capabilities", {})
-        res = []
-        if caps.get("ring"):
-            res.append("ring")
-        if caps.get("clipboard"):
-            res.append("clipboard")
-        if caps.get("file"):
-            res.append("file")
-        if caps.get("ping"):
-            res.append("ping")
-        if caps.get("text"):
-            res.append("text")
-        return res
-
-    full_dev = parse_device("DEVICE\tdev-full\tPhone\tphone\ttrue\ttrue\t100\ttrue\tkdeconnect_battery,kdeconnect_ping,kdeconnect_share,kdeconnect_runcommand,kdeconnect_findmyphone,kdeconnect_clipboard")
-    self.assertEqual(available_actions_for(full_dev), ["ring", "clipboard", "file", "ping", "text"])
-
-    part_dev = parse_device("DEVICE\tdev-part\tPhone\tphone\ttrue\ttrue\t50\tfalse\tkdeconnect_findmyphone,kdeconnect_clipboard")
-    self.assertEqual(available_actions_for(part_dev), ["ring", "clipboard"])
-
-    offline_dev = parse_device("DEVICE\tdev-off\tPhone\tphone\ttrue\tfalse\t50\tfalse\tkdeconnect_findmyphone,kdeconnect_clipboard")
-    self.assertEqual(available_actions_for(offline_dev), [])
-
-    unpaired_dev = parse_device("DEVICE\tdev-unpaired\tPhone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
-    self.assertEqual(available_actions_for(unpaired_dev), [])
-
-  def test_keyboard_navigation_state_flow(self):
-    class PanelNavState:
-        def __init__(self, actions, has_commands=True):
-            self.focus_section = "devices"
-            self.device_index = 0
-            self.action_index = 0
-            self.actions = actions
-            self.has_commands = has_commands
-
-        def key_right(self):
-            if self.focus_section == "devices":
-                if self.actions:
-                    self.focus_section = "actions"
-                    self.action_index = 0
-                elif self.has_commands:
-                    self.focus_section = "commands"
-            elif self.focus_section == "actions":
-                if self.action_index < len(self.actions) - 1:
-                    self.action_index += 1
-                elif self.has_commands:
-                    self.focus_section = "commands"
-                else:
-                    self.focus_section = "devices"
-            elif self.focus_section == "commands":
-                self.focus_section = "devices"
-
-        def key_left(self):
-            if self.focus_section == "commands":
-                if self.actions:
-                    self.focus_section = "actions"
-                    self.action_index = len(self.actions) - 1
-                else:
-                    self.focus_section = "devices"
-            elif self.focus_section == "actions":
-                if self.action_index > 0:
-                    self.action_index -= 1
-                else:
-                    self.focus_section = "devices"
-            elif self.focus_section == "devices":
-                if self.has_commands:
-                    self.focus_section = "commands"
-                elif self.actions:
-                    self.focus_section = "actions"
-                    self.action_index = len(self.actions) - 1
-
-    nav = PanelNavState(["ring", "clipboard", "file", "ping", "text"], has_commands=True)
-    self.assertEqual(nav.focus_section, "devices")
-    nav.key_right()
-    self.assertEqual((nav.focus_section, nav.action_index), ("actions", 0))
-    nav.key_right()
-    self.assertEqual((nav.focus_section, nav.action_index), ("actions", 1))
-    nav.key_right()
-    nav.key_right()
-    nav.key_right()
-    self.assertEqual((nav.focus_section, nav.action_index), ("actions", 4))
-    nav.key_right()
-    self.assertEqual(nav.focus_section, "commands")
-    nav.key_right()
-    self.assertEqual(nav.focus_section, "devices")
-
-  def test_network_section_keyboard_navigation_and_focus_flow(self):
-    panel_source = (ROOT / "Panel.qml").read_text()
-    net_source = (ROOT / "components" / "NetworkSection.qml").read_text()
-
-    self.assertIn("readonly property var visibleSections:", panel_source)
-    self.assertIn("function navigateNextSection()", panel_source)
-    self.assertIn("function navigatePrevSection()", panel_source)
-    self.assertIn("getNetworkItemCount()", panel_source)
-    self.assertIn("networkSelectedIndex", panel_source)
-
-    self.assertIn("panel.networkSelectedIndex === (1 + index)", net_source)
-    self.assertIn("panel.networkSelectedIndex === (1 + ((root.service && root.service.tailscaleRunning) ? root.filteredPeers.length : 0) + index)", net_source)
-
-    class FullPanelNav:
-        def __init__(self, devices_count=2, actions=["ring", "clipboard"], has_media=True, commands=["cmd1", "cmd2"], peers=["p1", "p2"], saved=["s1"]):
-            self.devices_count = devices_count
-            self.actions = actions
-            self.has_media = has_media
-            self.commands = commands
-            self.peers = peers
-            self.saved = saved
-            self.commands_expanded = False
-            self.network_expanded = False
-
-            self.focus_section = "devices"
-            self.device_index = 0
-            self.action_index = 0
-            self.media_index = 1
-            self.command_index = 0
-            self.network_index = 0
-
-        @property
-        def visible_sections(self):
-            sections = ["devices"]
-            if self.actions: sections.append("actions")
-            if self.has_media: sections.append("media")
-            if self.commands: sections.append("commands")
-            sections.append("network")
-            return sections
-
-        def network_item_count(self):
-            if not self.network_expanded:
-                return 1
-            return 1 + len(self.peers) + len(self.saved)
-
-        def next_section(self):
-            idx = self.visible_sections.index(self.focus_section)
-            self.focus_section = self.visible_sections[(idx + 1) % len(self.visible_sections)]
-            if self.focus_section == "actions": self.action_index = 0
-            elif self.focus_section == "media": self.media_index = 0
-            elif self.focus_section == "commands": self.command_index = 0
-            elif self.focus_section == "network": self.network_index = 0
-
-        def prev_section(self):
-            idx = self.visible_sections.index(self.focus_section)
-            self.focus_section = self.visible_sections[(idx - 1 + len(self.visible_sections)) % len(self.visible_sections)]
-            if self.focus_section == "actions": self.action_index = len(self.actions) - 1
-            elif self.focus_section == "media": self.media_index = 2
-            elif self.focus_section == "commands": self.command_index = len(self.commands) - 1 if self.commands_expanded else 0
-            elif self.focus_section == "network": self.network_index = self.network_item_count() - 1 if self.network_expanded else 0
-
-        def key_down(self):
-            if self.focus_section == "devices":
-                if self.device_index < self.devices_count - 1:
-                    self.device_index += 1
-                else:
-                    self.next_section()
-            elif self.focus_section == "commands" and self.commands_expanded:
-                if self.command_index < len(self.commands) - 1:
-                    self.command_index += 1
-                else:
-                    self.next_section()
-            elif self.focus_section == "network" and self.network_expanded:
-                if self.network_index < self.network_item_count() - 1:
-                    self.network_index += 1
-                else:
-                    self.next_section()
-            else:
-                self.next_section()
-
-        def key_up(self):
-            if self.focus_section == "devices":
-                if self.device_index > 0:
-                    self.device_index -= 1
-                else:
-                    self.prev_section()
-            elif self.focus_section == "commands" and self.commands_expanded:
-                if self.command_index > 0:
-                    self.command_index -= 1
-                else:
-                    self.prev_section()
-            elif self.focus_section == "network" and self.network_expanded:
-                if self.network_index > 0:
-                    self.network_index -= 1
-                else:
-                    self.prev_section()
-            else:
-                self.prev_section()
-
-    nav = FullPanelNav()
-    self.assertEqual(nav.focus_section, "devices")
-    self.assertEqual(nav.device_index, 0)
-    nav.key_down()
-    self.assertEqual(nav.focus_section, "devices")
-    self.assertEqual(nav.device_index, 1)
-    nav.key_down()
-    self.assertEqual(nav.focus_section, "actions")
-    self.assertEqual(nav.action_index, 0)
-    nav.key_down()
-    self.assertEqual(nav.focus_section, "media")
-    nav.key_down()
-    self.assertEqual(nav.focus_section, "commands")
-    nav.key_down()
-    self.assertEqual(nav.focus_section, "network")
-    self.assertEqual(nav.network_index, 0)
-
-    nav.network_expanded = True
-    self.assertEqual(nav.network_item_count(), 4)
-    nav.key_down()
-    self.assertEqual(nav.network_index, 1)
-    nav.key_down()
-    self.assertEqual(nav.network_index, 2)
-    nav.key_down()
-    self.assertEqual(nav.network_index, 3)
-    nav.key_down()
-    self.assertEqual(nav.focus_section, "devices")
-
-    nav.key_up()
-    self.assertEqual(nav.focus_section, "devices")
-    self.assertEqual(nav.device_index, 0)
-    nav.key_up()
-    self.assertEqual(nav.focus_section, "network")
-    self.assertEqual(nav.network_index, 3)
-
-  def test_refresh_does_not_reset_discovery_state_when_ready(self):
-    controller_source = (ROOT / "KdeConnectController.qml").read_text()
-    self.assertIn('if (discoveryState !== "ready")', controller_source)
-    self.assertIn('dbusDebounceTimer', controller_source)
-
-
-  def test_device_section_selects_on_click_not_hover(self):
-    device_section_source = (ROOT / "components" / "DeviceSection.qml").read_text()
-    self.assertNotIn("onEntered", device_section_source)
-    self.assertNotIn("hoverEnabled", device_section_source)
-    self.assertIn("panel.selectDevice(modelData.id)", device_section_source)
-    self.assertIn("panel.cursorActive = true", device_section_source)
-    self.assertIn('panel.focusSection = "devices"', device_section_source)
-
-  def test_delegate_null_guards_prevent_typeerror(self):
-    device_section_source = (ROOT / "components" / "DeviceSection.qml").read_text()
-    self.assertIn("selectedDeviceId === modelData.id", device_section_source)
-    self.assertIn("deviceTypeIcon", device_section_source)
-    self.assertIn("modelData.paired", device_section_source)
-
-  def test_panel_select_device_syncs_selected_index(self):
-    class PanelState:
-        def __init__(self, devices):
-            self.devices = devices
-            self.selected_index = 0
-            self.selected_device_id = ""
-
-        def select_device(self, dev_id):
-            self.selected_device_id = dev_id
-            for i, d in enumerate(self.devices):
-                if d["id"] == str(dev_id):
-                    self.selected_index = i
-                    break
-
-    panel = PanelState([{"id": "d1"}, {"id": "d2"}, {"id": "d3"}])
-    panel.select_device("d2")
-    self.assertEqual(panel.selected_index, 1)
-    panel.select_device("d3")
-    self.assertEqual(panel.selected_index, 2)
-    panel_source = (ROOT / "Panel.qml").read_text()
-    self.assertIn("selectDevice", panel_source)
-    self.assertIn("selectedIndex", panel_source)
-
-  def test_dependency_installer_script_and_states(self):
-    installer_path = ROOT / "scripts" / "install_dependencies.sh"
-    self.assertTrue(installer_path.exists())
-    content = installer_path.read_text()
-    self.assertIn("pacman", content)
-    self.assertIn("kdeconnect", content)
-    self.assertIn("glib2", content)
-    self.assertIn("dbus", content)
-
-    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
-    self.assertIn("kdeconnect-cli", discovery_source)
-    self.assertIn("exit 127", discovery_source)
-
-    controller_source = (ROOT / "KdeConnectController.qml").read_text()
-    self.assertIn('discoveryState = "not_installed"', controller_source)
-    self.assertIn("installDependencies", controller_source)
-
-    device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
-    self.assertIn("Install Dependencies", device_section)
-    self.assertIn("installDependencies()", device_section)
-
-  def test_action_error_and_status_banner_contracts(self):
-    device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
-    self.assertIn("statusBanner", device_section)
-    self.assertIn("actionError", device_section)
-    self.assertIn("actionMessage", device_section)
-    self.assertIn("composerError", device_section)
-    self.assertIn("dismissButton", device_section)
-    self.assertIn('root.service.actionMessage = ""', device_section)
-    self.assertIn('root.service.actionError = ""', device_section)
-    self.assertIn('root.panel.composerError = ""', device_section)
-
-  def test_action_verbiage_and_auto_dismiss_contracts(self):
-    controller_source = (ROOT / "KdeConnectController.qml").read_text()
-    # Check natural action verbiages
-    self.assertIn('"Ping sent"', controller_source)
-    self.assertIn('"Text sent"', controller_source)
-    self.assertIn('"Ringing device..."', controller_source)
-    self.assertIn('"Clipboard synced"', controller_source)
-    self.assertIn('"File sent"', controller_source)
-    self.assertIn('"Command executed"', controller_source)
-    self.assertIn('"Pair request sent"', controller_source)
-    self.assertIn('"Device unpaired"', controller_source)
-
-    # Ensure no generic "accepted" action messages remain
-    self.assertNotIn('"Ping request accepted"', controller_source)
-    self.assertNotIn('"Text-share request accepted"', controller_source)
-    self.assertNotIn('"Ring request accepted"', controller_source)
-    self.assertNotIn('"Clipboard request accepted"', controller_source)
-    self.assertNotIn('"File-transfer request accepted"', controller_source)
-    self.assertNotIn('"Remote-command request accepted"', controller_source)
-    self.assertNotIn('"Pairing request accepted"', controller_source)
-    self.assertNotIn('"Unpair request accepted"', controller_source)
-
-    # Auto-dismiss timer contract
-    self.assertIn("actionDismissTimer", controller_source)
-    self.assertIn("interval: 4000", controller_source)
-    self.assertIn("onActionMessageChanged:", controller_source)
-    self.assertIn("onActionErrorChanged:", controller_source)
-
-  def test_discovery_script_skips_bad_device_with_continue(self):
-    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
-    self.assertIn("|| continue", discovery_source)
-
-  def test_discovery_script_reachability_verification(self):
-    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
-    self.assertIn("org.kde.kdeconnect.device isReachable", discovery_source)
-    self.assertNotIn("is_address_reachable()", discovery_source)
-    self.assertNotIn("/dev/tcp", discovery_source)
-
-  def test_device_section_offline_and_empty_states_contracts(self):
-    device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
-    self.assertIn("Required packages missing", device_section)
-    self.assertIn("Install Dependencies", device_section)
-    self.assertIn("KDE Connect daemon stopped", device_section)
-    self.assertIn("Start Service", device_section)
-    self.assertIn("No devices found", device_section)
-    self.assertIn("Allow in Firewall", device_section)
-
-  def test_action_toolbar_header_unknown_type_contract(self):
-    toolbar_source = (ROOT / "components" / "ActionToolbar.qml").read_text()
-    self.assertIn('"unknown"', toolbar_source)
-    self.assertNotIn('"UNKNOWN ACTIONS"', toolbar_source)
-
-  def test_unreachable_device_suppresses_battery_display(self):
-    offline_device = parse_device("DEVICE\tdev-off\tPhone\tphone\ttrue\tfalse\t80\ttrue\tkdeconnect_battery")
-    self.assertEqual(format_battery_status(offline_device), "")
-
-    device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
-    self.assertIn("root.device.reachable", device_section)
-
-  def test_keyboard_navigation_no_double_movement_and_hotkey_safety(self):
-    panel_source = (ROOT / "Panel.qml").read_text()
-    # Double movement fix: onMoveRequested does not double-step with select(dy)
-    self.assertIn("onMoveRequested:", panel_source)
-    self.assertNotIn("select(dy)", panel_source)
-    # Hotkey safety: onTextKey returns early during composition
-    self.assertIn('if (root.activeComposer !== "none") return', panel_source)
-    # Clamping actionSelectedIndex on availableActions changes
-    self.assertIn("onAvailableActionsChanged:", panel_source)
-    # Escape/c unpair confirmation cancellation
-    self.assertIn("root.cancelUnpairConfirm", panel_source)
-
-  def test_device_type_icon_mapping_and_defaults(self):
-    self.assertEqual(device_type_icon("phone"), "󰄜")
-    self.assertEqual(device_type_icon("tablet"), "󰓹")
-    self.assertEqual(device_type_icon("laptop"), "󰌢")
-    self.assertEqual(device_type_icon("desktop"), "󰍹")
-    self.assertEqual(device_type_icon("tv"), "󰵔")
-    self.assertEqual(device_type_icon("unknown"), "󰄜")
-    self.assertEqual(device_type_icon(""), "󰄜")
-    self.assertEqual(device_type_icon(None), "󰄜")
-
-    controller_source = (ROOT / "KdeConnectController.qml").read_text()
-    self.assertIn("function deviceTypeIcon(type)", controller_source)
-    service_source = (ROOT / "Service.qml").read_text()
-    self.assertIn("function deviceTypeIcon(type)", service_source)
-
-  def test_settings_action_filtering(self):
-    full_line = "DEVICE\tdev-full\tFull Phone\tphone\ttrue\ttrue\t100\ttrue\tkdeconnect_battery,kdeconnect_ping,kdeconnect_share,kdeconnect_findmyphone,kdeconnect_clipboard,kdeconnect_sms\t5G\t4"
-    dev = parse_device(full_line)
-
-    # Ping is disabled by default
-    default_acts = compute_available_actions(dev, {})
-    self.assertEqual(default_acts, ["ring", "clipboard", "file", "sms", "text"])
-
-    # Explicitly enable ping
-    all_acts = compute_available_actions(dev, {"showActionPing": True})
-    self.assertEqual(all_acts, ["ring", "clipboard", "file", "sms", "ping", "text"])
-
-    # Disable SMS with ping enabled
-    filtered_acts = compute_available_actions(dev, {"showActionSms": False, "showActionPing": True})
-    self.assertEqual(filtered_acts, ["ring", "clipboard", "file", "ping", "text"])
-
-    # Disable ring and clipboard
-    filtered_acts2 = compute_available_actions(dev, {"showActionRing": False, "showActionClipboard": False})
-    self.assertEqual(filtered_acts2, ["file", "sms", "text"])
-
-    panel_source = (ROOT / "Panel.qml").read_text()
-    self.assertIn("root.getSetting(\"showActionRing\", true)", panel_source)
-    self.assertIn("root.getSetting(\"showActionClipboard\", true)", panel_source)
-    self.assertIn("root.getSetting(\"showActionFile\", true)", panel_source)
-    self.assertIn("root.getSetting(\"showActionSms\", true)", panel_source)
-    self.assertIn("root.getSetting(\"showActionPing\", false)", panel_source)
-    self.assertIn("root.getSetting(\"showActionText\", true)", panel_source)
-
-  def test_settings_telemetry_filtering(self):
-    full_line = "DEVICE\tdev-full\tFull Phone\tphone\ttrue\ttrue\t85\ttrue\tkdeconnect_battery,kdeconnect_connectivity_report\tLTE\t3"
-    dev = parse_device(full_line)
-
-    # Full stats
-    self.assertEqual(format_battery_status(dev, show_battery=True, show_network=True), "85% • Charging • LTE (3/4)")
-
-    # Battery only
-    self.assertEqual(format_battery_status(dev, show_battery=True, show_network=False), "85% • Charging")
-
-    # Network only
-    self.assertEqual(format_battery_status(dev, show_battery=False, show_network=True), "LTE (3/4)")
-
-    # Neither
-    self.assertEqual(format_battery_status(dev, show_battery=False, show_network=False), "")
-
-    controller_source = (ROOT / "KdeConnectController.qml").read_text()
-    self.assertIn("function deviceBatteryText(device, showBattery, showNetwork)", controller_source)
-
-  def test_privileged_script_transparency_and_confirmation_prompts(self):
-    # install_dependencies.sh must preview the exact command and prompt
-    install_source = (ROOT / "scripts" / "install_dependencies.sh").read_text()
-    self.assertIn("Exact command that will be executed:", install_source)
-    self.assertIn("sudo pacman -S --needed kdeconnect glib2 dbus", install_source)
-    self.assertIn("Press Enter to proceed", install_source)
-    self.assertIn("Ctrl+C to cancel", install_source)
-
-    # setup_firewall.sh must preview commands and support ufw / firewalld
-    firewall_source = (ROOT / "scripts" / "setup_firewall.sh").read_text()
-    self.assertIn("1714-1764", firewall_source)
-    self.assertIn("sudo ufw allow 1714:1764/tcp", firewall_source)
-    self.assertIn("sudo ufw allow 1714:1764/udp", firewall_source)
-    self.assertIn("sudo ufw reload", firewall_source)
-    self.assertIn("firewall-cmd", firewall_source)
-    self.assertIn("Press Enter to apply", firewall_source)
-
-  def test_settings_schema_in_manifest(self):
-    manifest = json.loads((ROOT / "manifest.json").read_text())
-    self.assertIn("settings", manifest)
-    settings = manifest["settings"]
-    self.assertIn("showBatteryStats", settings)
-    self.assertIn("showBarBattery", settings)
-    self.assertFalse(settings["showBarBattery"]["default"])
-    self.assertIn("showNetworkStats", settings)
-    self.assertIn("showDeviceTypeIcons", settings)
-    self.assertIn("showMediaPlayer", settings)
-    self.assertTrue(settings["showMediaPlayer"]["default"])
-    self.assertIn("showRemoteCommands", settings)
-    self.assertIn("showTroubleshooting", settings)
-    self.assertIn("showActionRing", settings)
-    self.assertIn("showActionClipboard", settings)
-    self.assertIn("showActionFile", settings)
-    self.assertIn("showActionSms", settings)
-    self.assertIn("showActionPing", settings)
-    self.assertFalse(settings["showActionPing"]["default"])
-    self.assertIn("showActionText", settings)
-    self.assertIn("defaultPingMessage", settings)
-
-  def test_ui_tooltips_and_security_transparency(self):
-    device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
-    self.assertIn("sudo pacman", device_section)
-    self.assertIn("sudo ufw", device_section)
-
-    action_toolbar = (ROOT / "components" / "ActionToolbar.qml").read_text()
-    self.assertIn("PanelToolTip", action_toolbar)
-    self.assertIn("actionTooltip", action_toolbar)
-    self.assertIn("id: actionMouseArea", action_toolbar)
-
-  def test_media_player_capability_detection(self):
-    dev_with_mpris = parse_device("DEVICE\tdev-1\tPhone\tphone\ttrue\ttrue\t80\ttrue\tkdeconnect_battery,kdeconnect_mprisremote")
-    self.assertTrue(dev_with_mpris["capabilities"]["media"])
-
-    dev_with_control = parse_device("DEVICE\tdev-2\tLaptop\tlaptop\ttrue\ttrue\t90\tfalse\tkdeconnect_mpriscontrol")
-    self.assertTrue(dev_with_control["capabilities"]["media"])
-
-    dev_without_media = parse_device("DEVICE\tdev-3\tTablet\ttablet\ttrue\ttrue\t60\tfalse\tkdeconnect_battery,kdeconnect_ping")
-    self.assertFalse(dev_without_media["capabilities"]["media"])
-
-    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
-    self.assertIn("kdeconnect_mprisremote", discovery_source)
-    self.assertIn("kdeconnect_mpriscontrol", discovery_source)
 
+
+class PairingStateMachineTests(unittest.TestCase):
+  def test_pairing_success_transition_and_local_acceptance(self):
+    unpaired_dev = parse_device("DEVICE\tdev-1\tNearby Phone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery,kdeconnect_ping")
+    state = PairingState(devices=[unpaired_dev])
+    self.assertTrue(state.pair_device("dev-1"))
+    self.assertEqual(state.pending_pairing["dev-1"], "requesting")
+    self.assertEqual(state.action_state, "accepted")
+    self.assertEqual(state.action_message, "Pair request sent")
+    self.assertEqual(state.action_error, "")
+
+    completed = state.handle_pair_process_completed(state.generation, "dev-1", 0, is_pair=True)
+    self.assertTrue(completed)
+    self.assertEqual(state.pending_pairing["dev-1"], "requesting")
+    self.assertEqual(state.action_message, "Pair request sent")
+
+    state.apply_scan([
+        "DEVICE\tdev-1\tNearby Phone\tphone\ttrue\ttrue\t-1\tfalse\tkdeconnect_battery,kdeconnect_ping"
+    ], state.generation)
+    self.assertNotIn("dev-1", state.pending_pairing)
+    self.assertEqual(state.action_message, "Device paired")
+
+  def test_pairing_rejection_and_timeout_error_categorization(self):
+    unpaired_dev = parse_device("DEVICE\tdev-1\tNearby Phone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
+    state = PairingState(devices=[unpaired_dev])
+
+    # Rejection (exit code 2)
+    state.pair_device("dev-1")
+    state.handle_pair_process_completed(state.generation, "dev-1", 2, is_pair=True)
+    self.assertNotIn("dev-1", state.pending_pairing)
+    self.assertEqual(state.action_state, "failed")
+    self.assertEqual(state.action_error, "Pairing timed out or rejected")
+
+    # Timeout (exit code 3)
+    state.pair_device("dev-1")
+    state.handle_pair_process_completed(state.generation, "dev-1", 3, is_pair=True)
+    self.assertNotIn("dev-1", state.pending_pairing)
+    self.assertEqual(state.action_state, "failed")
+    self.assertEqual(state.action_error, "Pairing timed out or rejected")
+
+    # Watchdog timeout trigger
+    state.pair_device("dev-1")
+    state.handle_timeout("dev-1")
+    self.assertNotIn("dev-1", state.pending_pairing)
+    self.assertEqual(state.action_state, "failed")
+    self.assertEqual(state.action_error, "Pairing timed out or rejected")
+
+  def test_stale_pairing_cleanup_on_refresh(self):
+    unpaired_dev = parse_device("DEVICE\tdev-1\tNearby Phone\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
+    state = PairingState(devices=[unpaired_dev])
+
+    # Pair requested at timestamp 1000
+    state.pair_device("dev-1", timestamp=1000)
+    self.assertEqual(state.pending_pairing.get("dev-1"), "requesting")
+
+    # Refresh at timestamp 5000 (<10s) -> still requesting
+    state.refresh(force_network=True, current_time=5000)
+    self.assertEqual(state.pending_pairing.get("dev-1"), "requesting")
+
+    # Refresh at timestamp 12000 (>10s) -> stale request cleared
+    state.refresh(force_network=True, current_time=12000)
+    self.assertNotIn("dev-1", state.pending_pairing)
+
+  def test_inline_destructive_unpairing_confirmation_and_cancellation(self):
+    paired_dev = parse_device("DEVICE\tdev-1\tMy Phone\tphone\ttrue\ttrue\t80\tfalse\tkdeconnect_battery")
+    state = PairingState(devices=[paired_dev])
+
+    # Request confirmation
+    self.assertTrue(state.request_unpair_confirm("dev-1"))
+    self.assertEqual(state.unpair_confirming_id, "dev-1")
+    self.assertEqual(state.pending_pairing["dev-1"], "unpair_confirm")
+
+    # Cancel confirmation
+    state.cancel_unpair_confirm("dev-1")
+    self.assertEqual(state.unpair_confirming_id, "")
+    self.assertNotIn("dev-1", state.pending_pairing)
+
+    # Request again and confirm
+    state.request_unpair_confirm("dev-1")
+    self.assertTrue(state.confirm_unpair("dev-1"))
+    self.assertEqual(state.pending_pairing["dev-1"], "removing")
+    self.assertEqual(state.action_message, "Device unpaired")
+
+    # Exit code 1 (failure)
+    state.handle_pair_process_completed(state.generation, "dev-1", 1, is_pair=False)
+    self.assertEqual(state.pending_pairing["dev-1"], "failed")
+    self.assertEqual(state.action_error, "unpairing failed")
+
+  def test_selection_and_keyboard_cursor_retention_on_state_changes(self):
+    dev1 = parse_device("DEVICE\tdev-1\tPhone One\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
+    dev2 = parse_device("DEVICE\tdev-2\tPhone Two\tphone\ttrue\ttrue\t90\tfalse\tkdeconnect_battery")
+    state = PairingState(devices=[dev1, dev2], selected_device_id="dev-2")
+
+    state.apply_scan([
+        "DEVICE\tdev-2\tPhone Two\tphone\tfalse\ttrue\t90\tfalse\tkdeconnect_battery",
+        "DEVICE\tdev-1\tPhone One\tphone\ttrue\ttrue\t-1\tfalse\tkdeconnect_battery"
+    ], state.generation)
+
+    self.assertEqual(state.selected_device_id, "dev-2")
+
+  def test_multi_device_pairing_watchdog_isolation(self):
+    dev1 = parse_device("DEVICE\tdev-1\tPhone One\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery,kdeconnect_ping")
+    dev2 = parse_device("DEVICE\tdev-2\tPhone Two\tphone\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery,kdeconnect_ping")
+    state = PairingState(devices=[dev1, dev2], selected_device_id="dev-1")
+
+    self.assertTrue(state.pair_device("dev-1", timestamp=1000))
+    self.assertEqual(state.pending_pairing.get("dev-1"), "requesting")
+    self.assertEqual(state.pairing_request_times.get("dev-1"), 1000)
+
+    state.select_device("dev-2")
+    self.assertTrue(state.pair_device("dev-2", timestamp=20000))
+    self.assertEqual(state.pending_pairing.get("dev-2"), "requesting")
+    self.assertEqual(state.pairing_request_times.get("dev-2"), 20000)
+
+    timed_out = state.check_watchdog(30000)
+    self.assertEqual(timed_out, [])
+    self.assertEqual(state.pending_pairing.get("dev-1"), "requesting")
+    self.assertEqual(state.pending_pairing.get("dev-2"), "requesting")
+
+    timed_out = state.check_watchdog(32000)
+    self.assertEqual(timed_out, ["dev-1"])
+    self.assertNotIn("dev-1", state.pending_pairing)
+    self.assertEqual(state.pending_pairing.get("dev-2"), "requesting")
+
+    state.select_device("dev-2")
+    timed_out2 = state.check_watchdog(51000)
+    self.assertEqual(timed_out2, ["dev-2"])
+    self.assertNotIn("dev-2", state.pending_pairing)
+    self.assertEqual(state.action_state, "failed")
+    self.assertEqual(state.action_error, "Pairing timed out or rejected")
+
+  def test_device_selection_prioritizes_paired_and_reachable(self):
+    unpaired = parse_device("DEVICE\tdev-unpaired\tDesktop\tdesktop\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
+    offline = parse_device("DEVICE\tdev-offline\tTablet\ttablet\ttrue\tfalse\t50\tfalse\tkdeconnect_battery")
+    paired_online = parse_device("DEVICE\tdev-paired\tPhone\tphone\ttrue\ttrue\t80\ttrue\tkdeconnect_battery,kdeconnect_mprisremote")
+
+    state = PairingState()
+    state.selected_device_id = ""
+    state.devices = []
+    state.apply_scan([
+        "DEVICE\tdev-unpaired\tDesktop\tdesktop\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery",
+        "DEVICE\tdev-offline\tTablet\ttablet\ttrue\tfalse\t50\tfalse\tkdeconnect_battery",
+        "DEVICE\tdev-paired\tPhone\tphone\ttrue\ttrue\t80\ttrue\tkdeconnect_battery,kdeconnect_mprisremote",
+    ], state.generation)
+
+    self.assertEqual(state.selected_device_id, "dev-paired")
+
+
+
+class MediaPlayerStateTests(unittest.TestCase):
   def test_media_player_state_parsing_with_multi_players_and_album_art(self):
     state = MediaPlayerState("dev-1")
     raw_status = {
@@ -2015,6 +1329,192 @@ class StateTests(unittest.TestCase):
     self.assertEqual(state.build_action_command("Previous"), ["bash", "scripts/media_control.sh", "action", "device-xyz", "Previous"])
     self.assertEqual(state.build_player_command("Spotify"), ["bash", "scripts/media_control.sh", "player", "device-xyz", "Spotify"])
     self.assertEqual(state.build_status_command(), ["bash", "scripts/media_control.sh", "status", "device-xyz"])
+
+
+
+class ManifestValidationTests(unittest.TestCase):
+  def test_manifest_and_runtime_shape(self):
+    manifest = json.loads((ROOT / "manifest.json").read_text())
+    self.assertEqual(manifest["entryPoints"], {"service": "Service.qml", "barWidget": "BarWidget.qml"})
+    self.assertFalse((ROOT / "main.qml").exists())
+    self.assertTrue((ROOT / "Panel.qml").exists())
+    self.assertTrue(any((ROOT / "components").rglob("*.qml")))
+
+  def test_settings_schema_in_manifest(self):
+    manifest = json.loads((ROOT / "manifest.json").read_text())
+    self.assertIn("settings", manifest)
+    settings = manifest["settings"]
+    self.assertIn("showBatteryStats", settings)
+    self.assertIn("showBarBattery", settings)
+    self.assertFalse(settings["showBarBattery"]["default"])
+    self.assertIn("showNetworkStats", settings)
+    self.assertIn("showDeviceTypeIcons", settings)
+    self.assertIn("showMediaPlayer", settings)
+    self.assertTrue(settings["showMediaPlayer"]["default"])
+    self.assertIn("showRemoteCommands", settings)
+    self.assertIn("showTroubleshooting", settings)
+    self.assertIn("showActionRing", settings)
+    self.assertIn("showActionClipboard", settings)
+    self.assertIn("showActionFile", settings)
+    self.assertIn("showActionSms", settings)
+    self.assertIn("showActionPing", settings)
+    self.assertFalse(settings["showActionPing"]["default"])
+    self.assertIn("showActionText", settings)
+    self.assertIn("defaultPingMessage", settings)
+
+  def test_media_player_readme_and_manifest_accuracy(self):
+    readme_source = (ROOT / "README.md").read_text()
+    self.assertIn("player switching", readme_source)
+    self.assertNotIn("volume", readme_source)
+
+    manifest_source = (ROOT / "manifest.json").read_text()
+    self.assertIn("showMediaPlayer", manifest_source)
+
+
+
+class ScriptIntegrationTests(unittest.TestCase):
+  def test_file_picker_bounds_option_list_and_skips_missing_roots(self):
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        (home / "Downloads").mkdir()
+        for index in range(400):
+            entry = home / "Downloads" / f"{'n' * 200}-{index:04d}.pdf"
+            entry.write_text("x")
+            os.utime(entry, (index, index))
+
+        # Shadow the real menu so the picker's option list lands on stdout.
+        stub_dir = home / ".local" / "bin"
+        stub_dir.mkdir(parents=True)
+        stub = stub_dir / "omarchy-menu-select"
+        stub.write_text("#!/usr/bin/env bash\ncat\n")
+        stub.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts" / "pick_file.sh")],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "HOME": str(home), "OMARCHY_PATH": ""},
+        )
+
+    # Documents/Pictures/Videos are absent, which must not abort the picker.
+    self.assertEqual(result.returncode, 0)
+    options = result.stdout.splitlines()
+    self.assertTrue(options)
+    self.assertLess(len(options), 400)
+    self.assertLess(len(result.stdout.encode()), 128 * 1024)
+    self.assertTrue(options[0].endswith("-0399.pdf"))
+
+  def test_file_picker_supports_expanded_formats_and_desktop(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      home = Path(tmp)
+      desktop = home / "Desktop"
+      desktop.mkdir()
+      downloads = home / "Downloads"
+      downloads.mkdir()
+
+      desktop_file = desktop / "presentation.pptx"
+      desktop_file.write_text("dummy")
+
+      (downloads / "song.mp3").write_text("dummy")
+      (downloads / "lossless.flac").write_text("dummy")
+      (downloads / "voice.m4a").write_text("dummy")
+      (downloads / "audio.opus").write_text("dummy")
+
+      (downloads / "document.docx").write_text("dummy")
+      (downloads / "data.xlsx").write_text("dummy")
+      (downloads / "table.csv").write_text("dummy")
+      (downloads / "notes.md").write_text("dummy")
+      (downloads / "book.epub").write_text("dummy")
+
+      (downloads / "archive.7z").write_text("dummy")
+      (downloads / "compressed.zst").write_text("dummy")
+      (downloads / "app.apk").write_text("dummy")
+
+      stub_dir = home / ".local" / "bin"
+      stub_dir.mkdir(parents=True)
+      stub = stub_dir / "omarchy-menu-select"
+      stub.write_text("#!/usr/bin/env bash\ncat\n")
+      stub.chmod(0o755)
+
+      result = subprocess.run(
+          ["bash", str(ROOT / "scripts" / "pick_file.sh")],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "HOME": str(home), "OMARCHY_PATH": ""},
+      )
+
+      self.assertEqual(result.returncode, 0)
+      options = result.stdout.splitlines()
+      basenames = {Path(line).name for line in options}
+
+      expected = {
+          "presentation.pptx", "song.mp3", "lossless.flac", "voice.m4a",
+          "audio.opus", "document.docx", "data.xlsx", "table.csv",
+          "notes.md", "book.epub", "archive.7z", "compressed.zst", "app.apk"
+      }
+      for filename in expected:
+        self.assertIn(filename, basenames)
+
+      deep_dir = downloads / "a" / "b" / "c" / "d" / "e"
+      deep_dir.mkdir(parents=True)
+      (deep_dir / "hidden_too_deep.mp3").write_text("dummy")
+
+      result2 = subprocess.run(
+          ["bash", str(ROOT / "scripts" / "pick_file.sh")],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "HOME": str(home), "OMARCHY_PATH": ""},
+      )
+      options2 = result2.stdout.splitlines()
+      basenames2 = {Path(line).name for line in options2}
+      self.assertNotIn("hidden_too_deep.mp3", basenames2)
+
+  def test_custom_address_update_merges_with_authoritative_dbus_state(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text("#!/usr/bin/env bash\nprintf \"(<['100.64.0.1']>,)\\n\"\n")
+      gdbus.chmod(0o755)
+      busctl = stub_dir / "busctl"
+      busctl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\"\n")
+      busctl.chmod(0o755)
+
+      result = subprocess.run(
+          ["bash", str(ROOT / "scripts" / "update_custom_address.sh"), "add", "100.64.0.2"],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+
+    self.assertEqual(result.returncode, 0, result)
+    self.assertIn("customDevices as 2 100.64.0.1 100.64.0.2", result.stdout)
+
+  def test_discovery_accepts_typed_empty_device_array(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text(
+          "#!/usr/bin/env bash\n"
+          "if [[ \"$*\" == *NameHasOwner* ]]; then\n"
+          "  printf '(true,)\\n'\n"
+          "else\n"
+          "  printf '(@as [],)\\n'\n"
+          "fi\n"
+      )
+      gdbus.chmod(0o755)
+      kdeconnect_cli = stub_dir / "kdeconnect-cli"
+      kdeconnect_cli.write_text("#!/usr/bin/env bash\nexit 0\n")
+      kdeconnect_cli.chmod(0o755)
+
+      result = subprocess.run(
+          ["bash", str(ROOT / "scripts" / "discover_devices.sh")],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+
+      self.assertEqual(result.returncode, 0, result)
+      self.assertEqual(result.stdout, "CUSTOM_ADDRESSES_READY\n")
 
   def test_media_player_script_argument_validation(self):
     script_path = ROOT / "scripts" / "media_control.sh"
@@ -2212,21 +1712,443 @@ esac
       self.assertEqual(data["title"], "A Day In The Life\n(Take 1)")
       self.assertEqual(data["playerList"], ["Spotify", "Audacious"])
 
-  def test_device_selection_prioritizes_paired_and_reachable(self):
-    unpaired = parse_device("DEVICE\tdev-unpaired\tDesktop\tdesktop\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery")
-    offline = parse_device("DEVICE\tdev-offline\tTablet\ttablet\ttrue\tfalse\t50\tfalse\tkdeconnect_battery")
-    paired_online = parse_device("DEVICE\tdev-paired\tPhone\tphone\ttrue\ttrue\t80\ttrue\tkdeconnect_battery,kdeconnect_mprisremote")
 
-    state = PairingState()
-    state.selected_device_id = ""
-    state.devices = []
-    state.apply_scan([
-        "DEVICE\tdev-unpaired\tDesktop\tdesktop\tfalse\ttrue\t-1\tfalse\tkdeconnect_battery",
-        "DEVICE\tdev-offline\tTablet\ttablet\ttrue\tfalse\t50\tfalse\tkdeconnect_battery",
-        "DEVICE\tdev-paired\tPhone\tphone\ttrue\ttrue\t80\ttrue\tkdeconnect_battery,kdeconnect_mprisremote",
-    ], state.generation)
+  def test_custom_address_update_add_and_remove(self):
+    script = ROOT / "scripts" / "update_custom_address.sh"
 
-    self.assertEqual(state.selected_device_id, "dev-paired")
+    # Invalid operation
+    self.assertEqual(subprocess.run([BASH, str(script), "invalid", "100.64.0.1"], capture_output=True).returncode, 64)
+    # Invalid IP address syntax
+    self.assertEqual(subprocess.run([BASH, str(script), "add", "bad/ip addr"], capture_output=True).returncode, 64)
+
+    # Successful add and remove via D-Bus / busctl
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text("#!/usr/bin/env bash\nprintf \"(<['100.64.0.1']>,)\\n\"\n")
+      gdbus.chmod(0o755)
+      busctl = stub_dir / "busctl"
+      busctl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\"\n")
+      busctl.chmod(0o755)
+
+      res_add = subprocess.run(
+          [BASH, str(script), "add", "100.64.0.2"],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(res_add.returncode, 0)
+      self.assertIn("customDevices as 2 100.64.0.1 100.64.0.2", res_add.stdout)
+
+      res_remove = subprocess.run(
+          [BASH, str(script), "remove", "100.64.0.1"],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(res_remove.returncode, 0)
+      self.assertIn("customDevices as 0", res_remove.stdout)
+
+  def test_discover_devices_end_to_end(self):
+    script = ROOT / "scripts" / "discover_devices.sh"
+
+    # Missing required dependency exits 127
+    with tempfile.TemporaryDirectory() as empty_dir:
+      res_dep = subprocess.run([BASH, str(script)], capture_output=True, env={**os.environ, "PATH": empty_dir})
+      self.assertEqual(res_dep.returncode, 127)
+
+    # Daemon not running exits 69
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text("#!/usr/bin/env bash\nprintf '(false,)\\n'\n")
+      gdbus.chmod(0o755)
+      res_offline = subprocess.run(
+          [BASH, str(script)],
+          capture_output=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(res_offline.returncode, 69)
+
+    # Full discovery produces valid formatted output
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text(r"""#!/usr/bin/env bash
+if [[ "$*" == *NameHasOwner* ]]; then
+  printf '(true,)\n'
+elif [[ "$*" == *daemon.devices* ]]; then
+  printf "(['dev-1'],)\n"
+elif [[ "$*" == *customDevices* ]]; then
+  printf "(<['100.64.0.5']>,)\n"
+elif [[ "$*" == *name* ]]; then
+  printf "(<'My Phone'>,)\n"
+elif [[ "$*" == *type* ]]; then
+  printf "(<'phone'>,)\n"
+elif [[ "$*" == *isPaired* ]]; then
+  printf "(<true>,)\n"
+elif [[ "$*" == *isReachable* ]]; then
+  printf "(<true>,)\n"
+elif [[ "$*" == *supportedPlugins* ]]; then
+  printf "(<['kdeconnect_battery', 'kdeconnect_ping']>,)\n"
+elif [[ "$*" == *battery*charge* ]]; then
+  printf "(<85>,)\n"
+elif [[ "$*" == *battery*isCharging* ]]; then
+  printf "(<true>,)\n"
+elif [[ "$*" == *networkType* ]]; then
+  printf "(<'WiFi'>,)\n"
+elif [[ "$*" == *cellularNetworkStrength* ]]; then
+  printf "(<3>,)\n"
+else
+  printf "(<false>,)\n"
+fi
+""")
+      gdbus.chmod(0o755)
+      kdeconnect_cli = stub_dir / "kdeconnect-cli"
+      kdeconnect_cli.write_text("#!/usr/bin/env bash\nexit 0\n")
+      kdeconnect_cli.chmod(0o755)
+
+      result = subprocess.run(
+          [BASH, str(script)],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+
+      self.assertEqual(result.returncode, 0)
+      lines = result.stdout.splitlines()
+      self.assertIn("CUSTOM_ADDRESSES_READY", lines)
+      self.assertIn("CUSTOM_ADDRESS\t100.64.0.5", lines)
+
+      device_line = next(line for line in lines if line.startswith("DEVICE\t"))
+      device = parse_device(device_line)
+      self.assertIsNotNone(device)
+      self.assertEqual(device["id"], "dev-1")
+      self.assertEqual(device["name"], "My Phone")
+      self.assertEqual(device["battery"], 85)
+      self.assertTrue(device["charging"])
+      self.assertTrue(device["capabilities"]["battery"])
+      self.assertTrue(device["capabilities"]["ping"])
+
+  def test_media_control_action_and_player_dispatch(self):
+    script = ROOT / "scripts" / "media_control.sh"
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      log_path = Path(tmp) / "calls.log"
+      gdbus = stub_dir / "gdbus"
+      gdbus.write_text(f"#!/usr/bin/env bash\necho \"$*\" >> {log_path}\nexit 0\n")
+      gdbus.chmod(0o755)
+
+      res_action = subprocess.run(
+          [BASH, str(script), "action", "dev-1", "PlayPause"],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      res_player = subprocess.run(
+          [BASH, str(script), "player", "dev-1", "Spotify"],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(res_action.returncode, 0)
+      self.assertEqual(res_player.returncode, 0)
+      log = log_path.read_text()
+      self.assertIn("mprisremote.sendAction PlayPause", log)
+      self.assertIn("Properties.Set org.kde.kdeconnect.device.mprisremote player <'Spotify'>", log)
+
+  def test_open_sms_script_execution(self):
+    script = ROOT / "scripts" / "open_sms.sh"
+
+    # Missing binary exits 127
+    with tempfile.TemporaryDirectory() as empty_dir:
+      res_missing = subprocess.run([BASH, str(script)], capture_output=True, env={**os.environ, "PATH": empty_dir})
+      self.assertEqual(res_missing.returncode, 127)
+
+    # Available binary runs with device argument
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      log_path = stub_dir / "sms.log"
+      sms_bin = stub_dir / "kdeconnect-sms"
+      sms_bin.write_text(f"#!/usr/bin/env bash\necho \"$*\" > {log_path}\nexit 0\n")
+      sms_bin.chmod(0o755)
+
+      res = subprocess.run(
+          [BASH, str(script), "dev-42"],
+          capture_output=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      deadline = time.time() + 1.0
+      while time.time() < deadline:
+        if log_path.exists() and log_path.stat().st_size > 0:
+          break
+        time.sleep(0.005)
+
+      self.assertEqual(res.returncode, 0)
+      self.assertEqual(log_path.read_text().strip(), "--device dev-42")
+
+  def test_open_app_script_execution(self):
+    script = ROOT / "scripts" / "open_app.sh"
+
+    # Missing any KDE Connect app binary exits 127
+    with tempfile.TemporaryDirectory() as empty_dir:
+      res_missing = subprocess.run([BASH, str(script)], capture_output=True, env={**os.environ, "PATH": empty_dir})
+      self.assertEqual(res_missing.returncode, 127)
+
+    # Falls back to kdeconnect-settings if kdeconnect-app is absent
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      app_bin = stub_dir / "kdeconnect-settings"
+      app_bin.write_text("#!/usr/bin/env bash\nexit 0\n")
+      app_bin.chmod(0o755)
+
+      res = subprocess.run(
+          [BASH, str(script)],
+          capture_output=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(res.returncode, 0)
+
+
+
+class QmlWiringAndContractTests(unittest.TestCase):
+  def test_pairing_contracts(self):
+    source = (ROOT / "KdeConnectController.qml").read_text()
+    self.assertIn("setPendingPairing", source)
+    self.assertIn("pairDevice", source)
+    self.assertIn("unpairDevice", source)
+    self.assertIn('"Pair request sent"', source)
+    self.assertIn('"Device paired"', source)
+    self.assertIn('"Device unpaired"', source)
+    self.assertIn('"Pairing timed out or rejected"', source)
+    self.assertIn("pairingWatchdogTimer", source)
+    self.assertIn("root.pairingRequestTimes[devId]", source)
+    self.assertIn("now - reqTime >= 30000", source)
+
+    ui_source = (ROOT / "Panel.qml").read_text() + "\n" + "\n".join(p.read_text() for p in (ROOT / "components").glob("*.qml"))
+    self.assertIn("unpairConfirmingId", ui_source)
+    self.assertIn("requestUnpairConfirm", ui_source)
+    self.assertIn("cancelUnpairConfirm", ui_source)
+    self.assertIn("confirmUnpair", ui_source)
+    self.assertIn("devicePendingState", ui_source)
+    self.assertIn("isUnpairConfirming", ui_source)
+
+  def test_tailscale_and_custom_address_contracts(self):
+    controller = (ROOT / "KdeConnectController.qml").read_text()
+    discovery = (ROOT / "scripts" / "discover_devices.sh").read_text()
+    network_ui = (ROOT / "components" / "NetworkSection.qml").read_text()
+    address_script = (ROOT / "scripts" / "update_custom_address.sh").read_text()
+
+    panel = (ROOT / "Panel.qml").read_text()
+    bar_widget = (ROOT / "BarWidget.qml").read_text()
+
+    self.assertIn('tailscale status --json', controller)
+    self.assertIn('function parseTailscaleStatus(output)', controller)
+    self.assertIn('function addCustomAddress(address)', controller)
+    self.assertIn('customAddressesReady', controller)
+    self.assertIn('getAddressScriptPath()', controller)
+    self.assertIn('customDevices as', address_script)
+    self.assertIn('Properties.Get', address_script)
+    self.assertIn('set-property', address_script)
+    self.assertIn('CUSTOM_ADDRESSES_READY', discovery)
+    self.assertIn('CUSTOM_ADDRESS\\t%s', discovery)
+    self.assertIn('Search peers or enter IP', network_ui)
+    self.assertIn('SAVED ADDRESSES', network_ui)
+    self.assertIn('panel.networkExpanded', network_ui)
+    self.assertIn('property bool networkExpanded', panel)
+    self.assertIn('function toggleNetworkExpanded', panel)
+    self.assertIn('showBarBattery', bar_widget)
+
+  def test_incoming_pairing_contracts(self):
+    controller = (ROOT / "KdeConnectController.qml").read_text()
+    ui = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertIn('isPairRequestedByPeer', (ROOT / "scripts" / "discover_devices.sh").read_text())
+    self.assertIn('function acceptPairing(id)', controller)
+    self.assertIn('org.kde.kdeconnect.device.acceptPairing', controller)
+    self.assertIn('function rejectPairing(id)', controller)
+    self.assertIn('org.kde.kdeconnect.device.cancelPairing', controller)
+    self.assertIn('Verify on both devices', ui)
+
+  def test_service_forwards_all_controller_actions(self):
+    service_source = (ROOT / "Service.qml").read_text()
+    self.assertIn("openSmsApp", service_source)
+    self.assertIn("controller.openSmsApp", service_source)
+    self.assertIn("openKdeConnectApp", service_source)
+    self.assertIn("controller.openKdeConnectApp", service_source)
+    self.assertIn("configureFirewall", service_source)
+    self.assertIn("controller.configureFirewall", service_source)
+    self.assertIn("setPendingPairing", service_source)
+    self.assertIn("deviceNetworkIcon", service_source)
+    self.assertIn("refreshTailscale", service_source)
+    self.assertIn("addCustomAddress", service_source)
+    self.assertIn("acceptPairing", service_source)
+
+  def test_open_kdeconnect_app_contract(self):
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    device_ui = (ROOT / "components" / "DeviceSection.qml").read_text()
+    app_script = (ROOT / "scripts" / "open_app.sh").read_text()
+
+    self.assertIn("function openKdeConnectApp()", controller_source)
+    self.assertIn("getAppScriptPath()", controller_source)
+    self.assertIn("openKdeConnectApp()", device_ui)
+    self.assertIn("Open KDE Connect application", device_ui)
+    self.assertIn("kdeconnect-app", app_script)
+
+  def test_scan_and_picker_lifecycle_guards(self):
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    self.assertIn("function clearActionState()", controller_source)
+    self.assertIn("filePickerProcess.running", controller_source)
+
+  def test_discovery_property_failures_and_fields_are_sanitized(self):
+    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
+    self.assertIn("|| return 69", discovery_source)
+    self.assertIn("sanitize_field()", discovery_source)
+    self.assertIn("field=${field//$'\\t'/ }", discovery_source)
+
+  def test_sms_launcher_reports_missing_command(self):
+    sms_source = (ROOT / "scripts" / "open_sms.sh").read_text()
+    self.assertIn("command -v kdeconnect-sms", sms_source)
+    self.assertIn("exit 127", sms_source)
+
+  def test_no_privacy_product_claims_or_ui_processes(self):
+    self.assertNotIn("Process {", (ROOT / "BarWidget.qml").read_text())
+
+  def test_media_status_update_references_process_ids_directly(self):
+    import re
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    # QML child ids are in component scope but are NOT properties of the root
+    # item: `root.<processId>` resolves to undefined, so reading `.running`
+    # off it throws and the surrounding try/catch wipes mediaState to empty.
+    # Process ids must be referenced bare, like every other Process use here.
+    bad_refs = re.findall(r"root\.\w*Process\b", controller_source)
+    self.assertEqual(bad_refs, [], f"root-qualified Process id refs: {bad_refs}")
+    self.assertIn("mediaActionProcess.running", controller_source)
+
+  def test_shell_script_is_not_needed_for_file_sharing(self):
+    self.assertFalse((ROOT / "scripts" / "share_file.sh").exists())
+
+  def test_no_file_dialog_and_process_file_picker_contract(self):
+    sources = "\n".join(path.read_text() for path in ROOT.glob("*.qml"))
+    self.assertNotIn("QtQuick.Dialogs", sources)
+    self.assertNotIn("FileDialog {", sources)
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    self.assertIn("filePickerProcess", controller_source)
+    self.assertIn("getPickerScriptPath", controller_source)
+    picker_sh = (ROOT / "scripts" / "pick_file.sh").read_text()
+    self.assertIn("omarchy-menu-select", picker_sh)
+
+  def test_refresh_does_not_reset_discovery_state_when_ready(self):
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    self.assertIn('if (discoveryState !== "ready")', controller_source)
+    self.assertIn('dbusDebounceTimer', controller_source)
+
+  def test_delegate_null_guards_prevent_typeerror(self):
+    device_section_source = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertIn("selectedDeviceId === modelData.id", device_section_source)
+    self.assertIn("deviceTypeIcon", device_section_source)
+    self.assertIn("modelData.paired", device_section_source)
+
+  def test_dependency_installer_script_and_states(self):
+    installer_path = ROOT / "scripts" / "install_dependencies.sh"
+    self.assertTrue(installer_path.exists())
+    content = installer_path.read_text()
+    self.assertIn("pacman", content)
+    self.assertIn("kdeconnect", content)
+    self.assertIn("glib2", content)
+    self.assertIn("dbus", content)
+
+    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
+    self.assertIn("kdeconnect-cli", discovery_source)
+    self.assertIn("exit 127", discovery_source)
+
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    self.assertIn('discoveryState = "not_installed"', controller_source)
+    self.assertIn("installDependencies", controller_source)
+
+    device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertIn("Install Dependencies", device_section)
+    self.assertIn("installDependencies()", device_section)
+
+  def test_action_error_and_status_banner_contracts(self):
+    device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertIn("statusBanner", device_section)
+    self.assertIn("actionError", device_section)
+    self.assertIn("actionMessage", device_section)
+    self.assertIn("composerError", device_section)
+    self.assertIn("dismissButton", device_section)
+    self.assertIn('root.service.actionMessage = ""', device_section)
+    self.assertIn('root.service.actionError = ""', device_section)
+    self.assertIn('root.panel.composerError = ""', device_section)
+
+  def test_action_verbiage_and_auto_dismiss_contracts(self):
+    controller_source = (ROOT / "KdeConnectController.qml").read_text()
+    # Check natural action verbiages
+    self.assertIn('"Ping sent"', controller_source)
+    self.assertIn('"Text sent"', controller_source)
+    self.assertIn('"Ringing device..."', controller_source)
+    self.assertIn('"Clipboard synced"', controller_source)
+    self.assertIn('"File sent"', controller_source)
+    self.assertIn('"Command executed"', controller_source)
+    self.assertIn('"Pair request sent"', controller_source)
+    self.assertIn('"Device unpaired"', controller_source)
+
+    # Ensure no generic "accepted" action messages remain
+    self.assertNotIn('"Ping request accepted"', controller_source)
+    self.assertNotIn('"Text-share request accepted"', controller_source)
+    self.assertNotIn('"Ring request accepted"', controller_source)
+    self.assertNotIn('"Clipboard request accepted"', controller_source)
+    self.assertNotIn('"File-transfer request accepted"', controller_source)
+    self.assertNotIn('"Remote-command request accepted"', controller_source)
+    self.assertNotIn('"Pairing request accepted"', controller_source)
+    self.assertNotIn('"Unpair request accepted"', controller_source)
+
+    # Auto-dismiss timer contract
+    self.assertIn("actionDismissTimer", controller_source)
+    self.assertIn("interval: 4000", controller_source)
+    self.assertIn("onActionMessageChanged:", controller_source)
+    self.assertIn("onActionErrorChanged:", controller_source)
+
+  def test_discovery_script_skips_bad_device_with_continue(self):
+    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
+    self.assertIn("|| continue", discovery_source)
+
+  def test_discovery_script_reachability_verification(self):
+    discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
+    self.assertIn("org.kde.kdeconnect.device isReachable", discovery_source)
+    self.assertNotIn("is_address_reachable()", discovery_source)
+    self.assertNotIn("/dev/tcp", discovery_source)
+
+  def test_action_toolbar_header_unknown_type_contract(self):
+    toolbar_source = (ROOT / "components" / "ActionToolbar.qml").read_text()
+    self.assertIn('"unknown"', toolbar_source)
+    self.assertNotIn('"UNKNOWN ACTIONS"', toolbar_source)
+
+  def test_privileged_script_transparency_and_confirmation_prompts(self):
+    # install_dependencies.sh must preview the exact command and prompt
+    install_source = (ROOT / "scripts" / "install_dependencies.sh").read_text()
+    self.assertIn("Exact command that will be executed:", install_source)
+    self.assertIn("sudo pacman -S --needed kdeconnect glib2 dbus", install_source)
+    self.assertIn("Press Enter to proceed", install_source)
+    self.assertIn("Ctrl+C to cancel", install_source)
+
+    # setup_firewall.sh must preview commands and support ufw / firewalld
+    firewall_source = (ROOT / "scripts" / "setup_firewall.sh").read_text()
+    self.assertIn("1714-1764", firewall_source)
+    self.assertIn("sudo ufw allow 1714:1764/tcp", firewall_source)
+    self.assertIn("sudo ufw allow 1714:1764/udp", firewall_source)
+    self.assertIn("sudo ufw reload", firewall_source)
+    self.assertIn("firewall-cmd", firewall_source)
+    self.assertIn("Press Enter to apply", firewall_source)
+
+  def test_ui_tooltips_and_security_transparency(self):
+    device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertIn("sudo pacman", device_section)
+    self.assertIn("sudo ufw", device_section)
+
+    action_toolbar = (ROOT / "components" / "ActionToolbar.qml").read_text()
+    self.assertIn("PanelToolTip", action_toolbar)
+    self.assertIn("actionTooltip", action_toolbar)
+    self.assertIn("id: actionMouseArea", action_toolbar)
 
   def test_media_player_qml_contracts_and_components(self):
     controller_source = (ROOT / "KdeConnectController.qml").read_text()
@@ -2296,20 +2218,6 @@ esac
     self.assertIn("implicitHeight: Style.space(20)", media_section)
     self.assertNotIn("Math.max(1, parent.width - Style.space(32))", media_section)
 
-  def test_media_player_keyboard_navigation_in_panel(self):
-    panel_source = (ROOT / "Panel.qml").read_text()
-    self.assertIn('focusSection === "media"', panel_source)
-    self.assertIn('"media"', panel_source)
-    self.assertIn('toggleMediaExpanded()', panel_source)
-
-  def test_media_player_readme_and_manifest_accuracy(self):
-    readme_source = (ROOT / "README.md").read_text()
-    self.assertIn("player switching", readme_source)
-    self.assertNotIn("volume", readme_source)
-
-    manifest_source = (ROOT / "manifest.json").read_text()
-    self.assertIn("showMediaPlayer", manifest_source)
-
   def test_bar_widget_battery_feature_flag(self):
     bar_widget = (ROOT / "BarWidget.qml").read_text()
     manifest = json.loads((ROOT / "manifest.json").read_text())
@@ -2337,14 +2245,6 @@ esac
         evaluate_bar_text({"reachable": True, "battery": 85}, {"showBarBattery": True, "showBatteryStats": False}),
         "📱 85%",
     )
-
-  def test_network_input_blocks_key_catcher(self):
-    panel_source = (ROOT / "Panel.qml").read_text()
-    self.assertIn("networkSection.addressInput.activeFocus", panel_source)
-    network_source = (ROOT / "components" / "NetworkSection.qml").read_text()
-    self.assertIn("property alias addressInput: addressInput", network_source)
-    self.assertIn("Keys.onEscapePressed", network_source)
-
 
   def test_file_transfer_concurrency_decoupling(self):
     controller_source = (ROOT / "KdeConnectController.qml").read_text()
@@ -2376,7 +2276,6 @@ esac
     self.assertIn("!canAct(id)", controller_source)
     self.assertIn("fileTransferGeneration += 1", controller_source)
     self.assertIn("fileTransferDismissTimer.stop()", controller_source)
-
 
   def test_dbus_signal_filtering_and_monitoring(self):
     controller_source = (ROOT / "KdeConnectController.qml").read_text()
@@ -2422,6 +2321,326 @@ esac
     self.assertIsNone(simulate_parse("   string \"mpris metadata\""))
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
+class PanelNavigationAndLayoutContractTests(unittest.TestCase):
+  def test_confirming_unpair_cannot_follow_a_device_switch(self):
+    class UnpairStateMachine:
+        def __init__(self):
+            self.selected_device_id = "dev-1"
+            self.unpair_confirming_id = ""
+            self.unpaired = []
+
+        def select_device(self, dev_id):
+            if self.unpair_confirming_id and self.unpair_confirming_id != dev_id:
+                self.cancel_unpair_confirm(self.unpair_confirming_id)
+            self.selected_device_id = dev_id
+
+        def request_unpair_confirm(self, dev_id):
+            if self.unpair_confirming_id and self.unpair_confirming_id != dev_id:
+                self.cancel_unpair_confirm(self.unpair_confirming_id)
+            self.unpair_confirming_id = dev_id
+
+        def cancel_unpair_confirm(self, dev_id):
+            if not dev_id or self.unpair_confirming_id == dev_id:
+                self.unpair_confirming_id = ""
+
+        def confirm_unpair(self, dev_id):
+            if self.unpair_confirming_id and self.unpair_confirming_id != dev_id:
+                return
+            self.unpair_confirming_id = ""
+            self.unpaired.append(dev_id)
+
+    sm = UnpairStateMachine()
+    sm.request_unpair_confirm("dev-1")
+    self.assertEqual(sm.unpair_confirming_id, "dev-1")
+    sm.select_device("dev-2")
+    self.assertEqual(sm.unpair_confirming_id, "")
+
+    sm.request_unpair_confirm("dev-1")
+    sm.confirm_unpair("dev-2")
+    self.assertEqual(sm.unpaired, [])
+    self.assertEqual(sm.unpair_confirming_id, "dev-1")
+
+    sm.confirm_unpair("dev-1")
+    self.assertEqual(sm.unpaired, ["dev-1"])
+    self.assertEqual(sm.unpair_confirming_id, "")
+
+    panel_source = (ROOT / "Panel.qml").read_text()
+    self.assertIn("unpairConfirmingId", panel_source)
+    self.assertIn("confirmUnpair", panel_source)
+    self.assertIn("cancelUnpairConfirm", panel_source)
+
+  def test_complete_panel_layout_and_action_navigation_contracts(self):
+    ui_source = (ROOT / "Panel.qml").read_text() + "\n" + "\n".join(p.read_text() for p in (ROOT / "components").glob("*.qml"))
+    self.assertIn("availableActions", ui_source)
+    self.assertIn("triggerAction", ui_source)
+    self.assertIn("actionSelectedIndex", ui_source)
+    self.assertIn("focusSection", ui_source)
+    self.assertIn("DEVICES", ui_source)
+    self.assertIn("ACTIONS", ui_source)
+    self.assertIn("REMOTE COMMANDS", ui_source)
+    self.assertIn("deviceOverviewStatus", ui_source)
+
+  def test_keyboard_navigation_state_flow(self):
+    class PanelNavState:
+        def __init__(self, actions, has_commands=True):
+            self.focus_section = "devices"
+            self.device_index = 0
+            self.action_index = 0
+            self.actions = actions
+            self.has_commands = has_commands
+
+        def key_right(self):
+            if self.focus_section == "devices":
+                if self.actions:
+                    self.focus_section = "actions"
+                    self.action_index = 0
+                elif self.has_commands:
+                    self.focus_section = "commands"
+            elif self.focus_section == "actions":
+                if self.action_index < len(self.actions) - 1:
+                    self.action_index += 1
+                elif self.has_commands:
+                    self.focus_section = "commands"
+                else:
+                    self.focus_section = "devices"
+            elif self.focus_section == "commands":
+                self.focus_section = "devices"
+
+        def key_left(self):
+            if self.focus_section == "commands":
+                if self.actions:
+                    self.focus_section = "actions"
+                    self.action_index = len(self.actions) - 1
+                else:
+                    self.focus_section = "devices"
+            elif self.focus_section == "actions":
+                if self.action_index > 0:
+                    self.action_index -= 1
+                else:
+                    self.focus_section = "devices"
+            elif self.focus_section == "devices":
+                if self.has_commands:
+                    self.focus_section = "commands"
+                elif self.actions:
+                    self.focus_section = "actions"
+                    self.action_index = len(self.actions) - 1
+
+    nav = PanelNavState(["ring", "clipboard", "file", "ping", "text"], has_commands=True)
+    self.assertEqual(nav.focus_section, "devices")
+    nav.key_right()
+    self.assertEqual((nav.focus_section, nav.action_index), ("actions", 0))
+    nav.key_right()
+    self.assertEqual((nav.focus_section, nav.action_index), ("actions", 1))
+    nav.key_right()
+    nav.key_right()
+    nav.key_right()
+    self.assertEqual((nav.focus_section, nav.action_index), ("actions", 4))
+    nav.key_right()
+    self.assertEqual(nav.focus_section, "commands")
+    nav.key_right()
+    self.assertEqual(nav.focus_section, "devices")
+
+  def test_network_section_keyboard_navigation_and_focus_flow(self):
+    panel_source = (ROOT / "Panel.qml").read_text()
+    net_source = (ROOT / "components" / "NetworkSection.qml").read_text()
+
+    self.assertIn("readonly property var visibleSections:", panel_source)
+    self.assertIn("function navigateNextSection()", panel_source)
+    self.assertIn("function navigatePrevSection()", panel_source)
+    self.assertIn("getNetworkItemCount()", panel_source)
+    self.assertIn("networkSelectedIndex", panel_source)
+
+    self.assertIn("panel.networkSelectedIndex === (1 + index)", net_source)
+    self.assertIn("panel.networkSelectedIndex === (1 + ((root.service && root.service.tailscaleRunning) ? root.filteredPeers.length : 0) + index)", net_source)
+
+    class FullPanelNav:
+        def __init__(self, devices_count=2, actions=["ring", "clipboard"], has_media=True, commands=["cmd1", "cmd2"], peers=["p1", "p2"], saved=["s1"]):
+            self.devices_count = devices_count
+            self.actions = actions
+            self.has_media = has_media
+            self.commands = commands
+            self.peers = peers
+            self.saved = saved
+            self.commands_expanded = False
+            self.network_expanded = False
+
+            self.focus_section = "devices"
+            self.device_index = 0
+            self.action_index = 0
+            self.media_index = 1
+            self.command_index = 0
+            self.network_index = 0
+
+        @property
+        def visible_sections(self):
+            sections = ["devices"]
+            if self.actions: sections.append("actions")
+            if self.has_media: sections.append("media")
+            if self.commands: sections.append("commands")
+            sections.append("network")
+            return sections
+
+        def network_item_count(self):
+            if not self.network_expanded:
+                return 1
+            return 1 + len(self.peers) + len(self.saved)
+
+        def next_section(self):
+            idx = self.visible_sections.index(self.focus_section)
+            self.focus_section = self.visible_sections[(idx + 1) % len(self.visible_sections)]
+            if self.focus_section == "actions": self.action_index = 0
+            elif self.focus_section == "media": self.media_index = 0
+            elif self.focus_section == "commands": self.command_index = 0
+            elif self.focus_section == "network": self.network_index = 0
+
+        def prev_section(self):
+            idx = self.visible_sections.index(self.focus_section)
+            self.focus_section = self.visible_sections[(idx - 1 + len(self.visible_sections)) % len(self.visible_sections)]
+            if self.focus_section == "actions": self.action_index = len(self.actions) - 1
+            elif self.focus_section == "media": self.media_index = 2
+            elif self.focus_section == "commands": self.command_index = len(self.commands) - 1 if self.commands_expanded else 0
+            elif self.focus_section == "network": self.network_index = self.network_item_count() - 1 if self.network_expanded else 0
+
+        def key_down(self):
+            if self.focus_section == "devices":
+                if self.device_index < self.devices_count - 1:
+                    self.device_index += 1
+                else:
+                    self.next_section()
+            elif self.focus_section == "commands" and self.commands_expanded:
+                if self.command_index < len(self.commands) - 1:
+                    self.command_index += 1
+                else:
+                    self.next_section()
+            elif self.focus_section == "network" and self.network_expanded:
+                if self.network_index < self.network_item_count() - 1:
+                    self.network_index += 1
+                else:
+                    self.next_section()
+            else:
+                self.next_section()
+
+        def key_up(self):
+            if self.focus_section == "devices":
+                if self.device_index > 0:
+                    self.device_index -= 1
+                else:
+                    self.prev_section()
+            elif self.focus_section == "commands" and self.commands_expanded:
+                if self.command_index > 0:
+                    self.command_index -= 1
+                else:
+                    self.prev_section()
+            elif self.focus_section == "network" and self.network_expanded:
+                if self.network_index > 0:
+                    self.network_index -= 1
+                else:
+                    self.prev_section()
+            else:
+                self.prev_section()
+
+    nav = FullPanelNav()
+    self.assertEqual(nav.focus_section, "devices")
+    self.assertEqual(nav.device_index, 0)
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "devices")
+    self.assertEqual(nav.device_index, 1)
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "actions")
+    self.assertEqual(nav.action_index, 0)
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "media")
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "commands")
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "network")
+    self.assertEqual(nav.network_index, 0)
+
+    nav.network_expanded = True
+    self.assertEqual(nav.network_item_count(), 4)
+    nav.key_down()
+    self.assertEqual(nav.network_index, 1)
+    nav.key_down()
+    self.assertEqual(nav.network_index, 2)
+    nav.key_down()
+    self.assertEqual(nav.network_index, 3)
+    nav.key_down()
+    self.assertEqual(nav.focus_section, "devices")
+
+    nav.key_up()
+    self.assertEqual(nav.focus_section, "devices")
+    self.assertEqual(nav.device_index, 0)
+    nav.key_up()
+    self.assertEqual(nav.focus_section, "network")
+    self.assertEqual(nav.network_index, 3)
+
+  def test_device_section_selects_on_click_not_hover(self):
+    device_section_source = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertNotIn("onEntered", device_section_source)
+    self.assertNotIn("hoverEnabled", device_section_source)
+    self.assertIn("panel.selectDevice(modelData.id)", device_section_source)
+    self.assertIn("panel.cursorActive = true", device_section_source)
+    self.assertIn('panel.focusSection = "devices"', device_section_source)
+
+  def test_panel_select_device_syncs_selected_index(self):
+    class PanelState:
+        def __init__(self, devices):
+            self.devices = devices
+            self.selected_index = 0
+            self.selected_device_id = ""
+
+        def select_device(self, dev_id):
+            self.selected_device_id = dev_id
+            for i, d in enumerate(self.devices):
+                if d["id"] == str(dev_id):
+                    self.selected_index = i
+                    break
+
+    panel = PanelState([{"id": "d1"}, {"id": "d2"}, {"id": "d3"}])
+    panel.select_device("d2")
+    self.assertEqual(panel.selected_index, 1)
+    panel.select_device("d3")
+    self.assertEqual(panel.selected_index, 2)
+    panel_source = (ROOT / "Panel.qml").read_text()
+    self.assertIn("selectDevice", panel_source)
+    self.assertIn("selectedIndex", panel_source)
+
+  def test_device_section_offline_and_empty_states_contracts(self):
+    device_section = (ROOT / "components" / "DeviceSection.qml").read_text()
+    self.assertIn("Required packages missing", device_section)
+    self.assertIn("Install Dependencies", device_section)
+    self.assertIn("KDE Connect daemon stopped", device_section)
+    self.assertIn("Start Service", device_section)
+    self.assertIn("No devices found", device_section)
+    self.assertIn("Allow in Firewall", device_section)
+
+  def test_keyboard_navigation_no_double_movement_and_hotkey_safety(self):
+    panel_source = (ROOT / "Panel.qml").read_text()
+    # Double movement fix: onMoveRequested does not double-step with select(dy)
+    self.assertIn("onMoveRequested:", panel_source)
+    self.assertNotIn("select(dy)", panel_source)
+    # Hotkey safety: onTextKey returns early during composition
+    self.assertIn('if (root.activeComposer !== "none") return', panel_source)
+    # Clamping actionSelectedIndex on availableActions changes
+    self.assertIn("onAvailableActionsChanged:", panel_source)
+    # Escape/c unpair confirmation cancellation
+    self.assertIn("root.cancelUnpairConfirm", panel_source)
+
+  def test_media_player_keyboard_navigation_in_panel(self):
+    panel_source = (ROOT / "Panel.qml").read_text()
+    self.assertIn('focusSection === "media"', panel_source)
+    self.assertIn('"media"', panel_source)
+    self.assertIn('toggleMediaExpanded()', panel_source)
+
+  def test_network_input_blocks_key_catcher(self):
+    panel_source = (ROOT / "Panel.qml").read_text()
+    self.assertIn("networkSection.addressInput.activeFocus", panel_source)
+    network_source = (ROOT / "components" / "NetworkSection.qml").read_text()
+    self.assertIn("property alias addressInput: addressInput", network_source)
+    self.assertIn("Keys.onEscapePressed", network_source)
+
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)
