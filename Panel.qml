@@ -509,6 +509,7 @@ Panel {
             }
             onTextKey: function(value) {
                 if (root.activeComposer !== "none") return
+                if (!root.cursorActive) root.cursorActive = true
                 var key = String(value).toLowerCase()
                 if (key === "r" && root.service) {
                     root.service.refresh(true)
