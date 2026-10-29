@@ -257,12 +257,26 @@ logged="$(cat "$llog")"
 argc="${logged%%$'\t'*}"
 arg="${logged#*$'\t'}"
 assert_eq "omarchy launcher receives a single argument" "$argc" 1
-assert_eq "single argument is 'bash ' + printf-%q-quoted path" "$arg" "bash $(printf '%q' "$target")"
-assert "logged command re-parses without expanding \$dollar" test "$arg" != "bash $target"
+assert_eq "single argument is 'bash -- ' + printf-%q-quoted path" "$arg" "bash -- $(printf '%q' "$target")"
+assert "logged command re-parses without expanding \$dollar" test "$arg" != "bash -- $target"
+assert "logged command carries the option guard" test "${arg#bash -- }" != "$arg"
 rm -f "$WORK/marker"
-bash -c "$arg"
+# || true keeps a regression from aborting the whole suite under set -e;
+# the marker assertions below are what actually decide pass/fail.
+bash -c "$arg" || true
 assert "round-trip executes the exact original path (marker exists)" test -f "$WORK/marker"
 assert_eq "marker records the exact original path" "$(cat "$WORK/marker")" "$target"
+
+# a leading-dash target must not be parsed as bash options
+dashtarget="$WORK/-weird ta'rget.sh"
+printf '#!/usr/bin/env bash\nprintf "%%s" "$0" > %q\n' "$WORK/dashmarker" > "$dashtarget"
+llog="$WORK/launcher-dash.log"; : > "$llog"
+PATH="$LT_BIN:$COREBIN" LAUNCHER_LOG="$llog" "$BASH_BIN" "$LAUNCH" "$dashtarget"
+logged="$(cat "$llog")"; arg="${logged#*$'\t'}"
+rm -f "$WORK/dashmarker"
+bash -c "$arg" || true
+assert "leading-dash target still round-trips (marker exists)" test -f "$WORK/dashmarker"
+assert_eq "dash marker records the exact original path" "$(cat "$WORK/dashmarker")" "$dashtarget"
 
 # xdg-terminal-exec fallback: pure argv, no quoting at all
 XDG_BIN="$WORK/fake-xdg-bin"
@@ -279,8 +293,13 @@ PATH="$XDG_BIN:$COREBIN" LAUNCHER_LOG="$llog" "$BASH_BIN" "$LAUNCH" "$target"
 logged="$(cat "$llog")"
 argc="${logged%%$'\t'*}"
 arg="${logged#*$'\t'}"
-assert_eq "xdg-terminal-exec receives two argv elements" "$argc" 2
-assert_eq "xdg-terminal-exec argv is raw 'bash <path>'" "$arg" "bash $target"
+assert_eq "xdg-terminal-exec receives three argv elements" "$argc" 3
+assert_eq "xdg-terminal-exec argv is raw 'bash -- <path>'" "$arg" "bash -- $target"
+
+# extra arguments are rejected instead of silently dropped
+rc=0
+PATH="$COREBIN" "$BASH_BIN" "$LAUNCH" "$target" extra >"$WORK/extra.out" 2>"$WORK/extra.err" || rc=$?
+assert_rc_eq "extra arguments exit 2" "$rc" 2
 
 # no launcher available -> 127
 rc=0
