@@ -55,6 +55,10 @@ fi
 # qmllint simply is not installed. OMARCHY_PATH is cleared so the optional
 # Omarchy plugin validator (whose own PATH dependencies are not the thing
 # under test here) is not discovered through the fallback location either.
+# OMACONNECT_SKIP_BASH_TESTS keeps sibling bash suites (added by other
+# branches) out of this nested run: they build their own PATH sandboxes and
+# are not guaranteed to work inside this restricted one. SCOPED_CI_NESTED
+# stays as a second guard against this file re-entering itself.
 restricted_bin="$tmp/bin"
 mkdir -p "$restricted_bin"
 for tool in bash sh env python3 nohup awk gdbus busctl dirname basename \
@@ -67,7 +71,7 @@ for tool in bash sh env python3 nohup awk gdbus busctl dirname basename \
 done
 validate_out="$tmp/validate.out"
 if PATH="$restricted_bin" QMLLINT="$tmp/no-qmllint-here" OMARCHY_PATH="" \
-    SCOPED_CI_NESTED=1 bash scripts/validate.sh >"$validate_out" 2>&1; then
+    OMACONNECT_SKIP_BASH_TESTS=1 SCOPED_CI_NESTED=1 bash scripts/validate.sh >"$validate_out" 2>&1; then
     validate_status=0
 else
     validate_status=$?

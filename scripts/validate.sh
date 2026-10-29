@@ -32,6 +32,12 @@ fi
 
 # --- [2/6] bash tests (tests/*.test.sh) --------------------------------------
 printf '%s\n' "[2/${total_stages}] bash tests: tests/*.test.sh"
+if [ -n "${OMACONNECT_SKIP_BASH_TESTS:-}" ]; then
+    # Escape hatch for nested/sandboxed invocations: bash suites build their
+    # own PATH sandboxes and must not run inside another test's restricted
+    # environment. Each suite still runs at the top level.
+    printf '%s\n' "[2/${total_stages}] SKIP bash tests (OMACONNECT_SKIP_BASH_TESTS set)"
+else
 bash_any=0
 bash_failed=0
 for t in tests/*.test.sh; do
@@ -49,6 +55,7 @@ elif [ "$bash_failed" -eq 0 ]; then
 else
     printf '%s\n' "[2/${total_stages}] FAIL bash tests"
     failed_stages+=(2)
+fi
 fi
 
 # --- [3/6] shell syntax (scripts/*.sh) ---------------------------------------
