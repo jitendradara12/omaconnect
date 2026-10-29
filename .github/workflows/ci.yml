@@ -1,0 +1,58 @@
+# CI for the omaconnect plugin.
+#
+# What CI can cover headless:
+#   - the python unittest suite (tests/test_*.py): pure logic and script
+#     source contracts
+#   - the bash test suite (tests/*.test.sh): end-to-end script tests that
+#     drive the real scripts with PATH-shimmed fake binaries, so nothing
+#     touches the host
+#   - shell syntax (bash -n) and shellcheck (when installed)
+#
+# What CI cannot cover: the Quickshell QML runtime. The plugin UI needs a
+# running compositor/display, the omarchy-shell (Quickshell) engine and a
+# KDE Connect daemon, none of which exist on a headless runner. The QML
+# files therefore get a qmllint syntax check only — and even that is
+# optional: every tool is availability-checked and its stage is skipped
+# with a message when the tool is missing, so a failed install can never
+# fail the build.
+
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Optional tooling. continue-on-error: if the packages cannot be
+      # installed, validate.sh availability-checks each tool and skips its
+      # stage, and the belt-and-braces steps below still run the tests.
+      - name: Install optional tools (shellcheck, qmllint)
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck qt6-declarative-dev-tools
+          # qt6-declarative-dev-tools installs qmllint under /usr/lib/qt6/bin,
+          # which is not on the default runner PATH; export it so validate.sh
+          # can discover it (validate.sh also falls back to that path itself).
+          echo "/usr/lib/qt6/bin" >> "$GITHUB_PATH"
+
+      - name: validate.sh (all stages)
+        run: bash scripts/validate.sh
+
+      # Belt-and-braces: run the two test conventions directly as well, so a
+      # regression in validate.sh itself cannot hide test failures.
+      - name: Python unit tests (direct)
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -q
+
+      - name: Bash tests (direct)
+        run: |
+          status=0
+          for t in tests/*.test.sh; do
+            [ -e "$t" ] || continue
+            bash "$t" || status=1
+          done
+          exit "$status"
