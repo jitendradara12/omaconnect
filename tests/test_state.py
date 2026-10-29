@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import shutil
 import time
 import subprocess
@@ -10,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 BASH = shutil.which("bash") or "bash"
+FIXTURES = ROOT / "tests" / "fixtures"
 
 
 def parse_device(line):
@@ -739,8 +741,11 @@ class DeviceParsingAndFormattingTests(unittest.TestCase):
     self.assertFalse(dev_without_media["capabilities"]["media"])
 
     discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
-    self.assertIn("kdeconnect_mprisremote", discovery_source)
-    self.assertIn("kdeconnect_mpriscontrol", discovery_source)
+    report_source = (ROOT / "scripts" / "discover_report.py").read_text()
+    # The capability plugin list lives in the shared busctl JSON parser now.
+    self.assertIn("discover_report.py", discovery_source)
+    self.assertIn("kdeconnect_mprisremote", report_source)
+    self.assertIn("kdeconnect_mpriscontrol", report_source)
 
   def test_unreachable_device_suppresses_battery_display(self):
     offline_device = parse_device("DEVICE\tdev-off\tPhone\tphone\ttrue\tfalse\t80\ttrue\tkdeconnect_battery")
@@ -1372,6 +1377,60 @@ class ManifestValidationTests(unittest.TestCase):
 
 
 
+def write_busctl_stub(stub_dir, routes, log_path=None):
+  """Fake busctl: serves canned --json=short replies and records exact argv.
+
+  routes is a list of (glob pattern, reply) pairs matched against the joined
+  argument string, first match wins -- the STUB_CALLS technique from
+  omarchy-connect. A reply of None fails the call like a D-Bus error; a Path
+  is catted (fixture file); anything else is printed verbatim. Every call is
+  logged to log_path as a CALL line followed by one ARG:<arg> line per
+  argument, so tests can assert the exact argv the scripts hand to busctl.
+  """
+  lines = ["#!/usr/bin/env bash"]
+  if log_path is not None:
+    lines.append("{ printf 'CALL\\n'; printf 'ARG:%s\\n' \"$@\"; } >> " + shlex.quote(str(log_path)))
+  lines.append('case "$*" in')
+  for pattern, reply in routes:
+    if reply is None:
+      body = "exit 1"
+    elif isinstance(reply, Path):
+      body = "cat " + shlex.quote(str(reply))
+    else:
+      body = "printf '%s' " + shlex.quote(str(reply))
+    # case patterns cannot hold unquoted spaces; quote them so the glob
+    # characters stay active while literal spaces match "$*"'s separators.
+    lines.append("    " + pattern.replace(" ", '" "') + ") " + body + "; exit 0 ;;")
+  lines.extend(["    *) exit 1 ;;", "esac"])
+  stub = Path(stub_dir) / "busctl"
+  stub.write_text("\n".join(lines) + "\n")
+  stub.chmod(0o755)
+  return stub
+
+
+def read_busctl_calls(log_path):
+  """Exact argv of every fake busctl invocation, one list per call."""
+  calls = []
+  current = None
+  for line in Path(log_path).read_text().splitlines():
+    if line == "CALL":
+      current = []
+      calls.append(current)
+    elif line.startswith("ARG:") and current is not None:
+      current.append(line[4:])
+  return calls
+
+
+def assert_busctl_argv_clean(testcase, calls):
+  """No script ever builds a quoting payload: remote-chosen values (player
+  names, device ids) must ride as single bare argv elements -- never inside
+  a gdbus-style <'...'> value expression or backslash-escaped string."""
+  for call in calls:
+    for arg in call:
+      testcase.assertNotIn("<'", arg, call)
+      testcase.assertNotIn("\\'", arg, call)
+
+
 class ScriptIntegrationTests(unittest.TestCase):
   def test_file_picker_bounds_option_list_and_skips_missing_roots(self):
     with tempfile.TemporaryDirectory() as tmp:
@@ -1472,12 +1531,11 @@ class ScriptIntegrationTests(unittest.TestCase):
   def test_custom_address_update_merges_with_authoritative_dbus_state(self):
     with tempfile.TemporaryDirectory() as tmp:
       stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text("#!/usr/bin/env bash\nprintf \"(<['100.64.0.1']>,)\\n\"\n")
-      gdbus.chmod(0o755)
-      busctl = stub_dir / "busctl"
-      busctl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\"\n")
-      busctl.chmod(0o755)
+      log_path = stub_dir / "busctl.log"
+      write_busctl_stub(stub_dir, [
+          ("*set-property*customDevices*", ""),
+          ("*get-property*customDevices*", FIXTURES / "busctl-custom-devices.json"),
+      ], log_path)
 
       result = subprocess.run(
           ["bash", str(ROOT / "scripts" / "update_custom_address.sh"), "add", "100.64.0.2"],
@@ -1485,23 +1543,28 @@ class ScriptIntegrationTests(unittest.TestCase):
           text=True,
           env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
       )
+      calls = read_busctl_calls(log_path)
 
     self.assertEqual(result.returncode, 0, result)
-    self.assertIn("customDevices as 2 100.64.0.1 100.64.0.2", result.stdout)
+    assert_busctl_argv_clean(self, calls)
+    # The read comes from busctl get-property --json=short; the write stays a
+    # single busctl set-property with one argv element per address.
+    self.assertEqual(calls, [
+        ["--user", "--json=short", "get-property", "org.kde.kdeconnect",
+         "/modules/kdeconnect", "org.kde.kdeconnect.daemon", "customDevices"],
+        ["--user", "set-property", "org.kde.kdeconnect", "/modules/kdeconnect",
+         "org.kde.kdeconnect.daemon", "customDevices", "as", "2",
+         "100.64.0.1", "100.64.0.2"],
+    ])
 
   def test_discovery_accepts_typed_empty_device_array(self):
     with tempfile.TemporaryDirectory() as tmp:
       stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text(
-          "#!/usr/bin/env bash\n"
-          "if [[ \"$*\" == *NameHasOwner* ]]; then\n"
-          "  printf '(true,)\\n'\n"
-          "else\n"
-          "  printf '(@as [],)\\n'\n"
-          "fi\n"
-      )
-      gdbus.chmod(0o755)
+      write_busctl_stub(stub_dir, [
+          ("*NameHasOwner*", FIXTURES / "busctl-namehasowner-true.json"),
+          ("*get-property*customDevices*", FIXTURES / "busctl-custom-devices-empty.json"),
+          ("*daemon devices*", FIXTURES / "busctl-devices-empty.json"),
+      ])
       kdeconnect_cli = stub_dir / "kdeconnect-cli"
       kdeconnect_cli.write_text("#!/usr/bin/env bash\nexit 0\n")
       kdeconnect_cli.chmod(0o755)
@@ -1548,21 +1611,10 @@ class ScriptIntegrationTests(unittest.TestCase):
     script_path = ROOT / "scripts" / "media_control.sh"
     with tempfile.TemporaryDirectory() as tmp:
       stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text("\n".join([
-          "#!/usr/bin/env bash",
-          'case "$*" in',
-          "  *GetAll*) printf \"({'album': <''>, 'artist': <''>, 'isPlaying': <true>, 'localAlbumArtUrl': <'file:///tmp/cover.jpg'>, 'player': <'Music'>, 'playerList': <['Music']>, 'title': <'Track'>},)\\n\" ;;",
-          "  *localAlbumArtUrl*) printf \"(<'file:///tmp/cover.jpg'>,)\\n\" ;;",
-          "  *playerList*) printf \"(<['Music']>,)\\n\" ;;",
-          "  *isPlaying*) printf \"(<true>,)\\n\" ;;",
-          "  *player*) printf \"(<'Music'>,)\\n\" ;;",
-          "  *title*) printf \"(<'Track'>,)\\n\" ;;",
-          "  *) printf \"(<' '>,)\\n\" ;;",
-          "esac",
-          "",
-      ]))
-      _ = gdbus.chmod(0o755)
+      log_path = stub_dir / "busctl.log"
+      write_busctl_stub(stub_dir, [
+          ("*mprisremote*GetAll*", FIXTURES / "busctl-mpris-getall.json"),
+      ], log_path)
       result = subprocess.run(
           ["bash", str(script_path), "status", "dev-1"],
           capture_output=True,
@@ -1574,27 +1626,24 @@ class ScriptIntegrationTests(unittest.TestCase):
     self.assertEqual(result.returncode, 0, result.stderr)
     self.assertEqual(json.loads(result.stdout)["albumArt"], "file:///tmp/cover.jpg")
 
-    # Verify GetAll consolidation and absence of blocking 1s requestPlayerList in media_control.sh
-    media_script_content = script_path.read_text()
-    self.assertIn("Properties.GetAll", media_script_content)
-    self.assertIn("request_players", media_script_content)
-    self.assertNotIn("requestPlayerList\"], capture_output=True, text=True, timeout=1", media_script_content)
+    # Verify GetAll consolidation and absence of blocking requestPlayerList in status
+    media_helper_content = (ROOT / "scripts" / "media_status.py").read_text()
+    self.assertIn('"GetAll"', media_helper_content)
+    self.assertIn("org.freedesktop.DBus.Properties", media_helper_content)
+    self.assertNotIn("requestPlayerList", media_helper_content)
+    self.assertIn("request_players", script_path.read_text())
 
   def test_media_player_parses_apostrophes_and_supports_fallback(self):
     script_path = ROOT / "scripts" / "media_control.sh"
+    # Hostile metadata: quotes, apostrophes, markup and a multiline title.
+    # Under structured JSON these are values again -- the old gdbus regex
+    # parser broke on exactly this shape.
     with tempfile.TemporaryDirectory() as tmp:
       stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text(r"""#!/usr/bin/env bash
-case "$*" in
-  *GetAll*) cat << 'EOF'
-({'album': <'Greatest Hits'>, 'artist': <'Guns N\' Roses'>, 'isPlaying': <true>, 'localAlbumArtUrl': <''>, 'player': <'Spotify'>, 'playerList': <['Spotify', 'Don\'t Stop']>, 'title': <'Don\'t Cry'>},)
-EOF
-  ;;
-  *) printf "(<' '>,)\n" ;;
-esac
-""")
-      _ = gdbus.chmod(0o755)
+      log_path = stub_dir / "busctl.log"
+      write_busctl_stub(stub_dir, [
+          ("*mprisremote*GetAll*", FIXTURES / "busctl-mpris-getall-hostile.json"),
+      ], log_path)
       result = subprocess.run(
           ["bash", str(script_path), "status", "dev-1"],
           capture_output=True,
@@ -1604,26 +1653,23 @@ esac
       )
       self.assertEqual(result.returncode, 0, result.stderr)
       data = json.loads(result.stdout)
-      self.assertEqual(data["artist"], "Guns N' Roses")
-      self.assertEqual(data["title"], "Don't Cry")
-      self.assertIn("Don't Stop", data["playerList"])
+      self.assertEqual(data, {
+          "isPlaying": False,
+          "title": "Don't \"Quit\" <b>NOW</b>\n(Take 2)",
+          "artist": "Guns N' Roses",
+          "album": "Greatest Hits '86",
+          "player": "Spotify",
+          "playerList": ["Spotify", "Don't Stop"],
+          "albumArt": "file:///tmp/dont cry.jpg",
+      })
+      assert_busctl_argv_clean(self, read_busctl_calls(log_path))
 
+    # nowPlaying fallback when no title is reported
     with tempfile.TemporaryDirectory() as tmp:
       stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text(r"""#!/usr/bin/env bash
-case "$*" in
-  *GetAll*) exit 1 ;;
-  *isPlaying*) printf "(<true>,)\n" ;;
-  *title*) cat << 'EOF'
-(<'Sweet Child O\' Mine'>,)
-EOF
-  ;;
-  *playerList*) printf "(<['Spotify']>,)\n" ;;
-  *) printf "(<''>,)\n" ;;
-esac
-""")
-      _ = gdbus.chmod(0o755)
+      write_busctl_stub(stub_dir, [
+          ("*mprisremote*GetAll*", FIXTURES / "busctl-mpris-getall-nowplaying.json"),
+      ])
       result = subprocess.run(
           ["bash", str(script_path), "status", "dev-1"],
           capture_output=True,
@@ -1634,30 +1680,21 @@ esac
       self.assertEqual(result.returncode, 0, result.stderr)
       data = json.loads(result.stdout)
       self.assertTrue(data["isPlaying"])
-      self.assertEqual(data["title"], "Sweet Child O' Mine")
+      self.assertEqual(data["title"], "Fallback Now Playing")
+      self.assertEqual(data["player"], "MPD")
 
   def test_media_player_multiline_and_empty_player_fallback(self):
     script_path = ROOT / "scripts" / "media_control.sh"
-    # Case 1: Empty player but playerList has entries -> defaults to first player and sets D-Bus property
+    # Case 1: Empty player but playerList has entries -> defaults to first
+    # player, persisted through a pure-argv busctl set-property call (the
+    # gdbus escaped_player quoting hack is gone for good).
     with tempfile.TemporaryDirectory() as tmp:
       stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text(r"""#!/usr/bin/env bash
-if [[ "$*" == *"Properties.GetAll"* ]]; then
-  cat << 'EOF'
-({'album': <''>, 'artist': <''>, 'isPlaying': <false>, 'player': <''>, 'playerList': <['Spotify', 'VLC']>},)
-EOF
-elif [[ "$*" == *"Properties.Set"* ]]; then
-  echo "SET_CALLED: $*" >> /tmp/gdbus_set_test.log
-  exit 0
-else
-  printf "(<''>,)\n"
-fi
-""")
-      _ = gdbus.chmod(0o755)
-      set_log = Path("/tmp/gdbus_set_test.log")
-      if set_log.exists():
-        set_log.unlink()
+      log_path = stub_dir / "busctl.log"
+      write_busctl_stub(stub_dir, [
+          ("*set-property*mprisremote*player*", ""),
+          ("*mprisremote*GetAll*", FIXTURES / "busctl-mpris-getall-autoselect.json"),
+      ], log_path)
       result = subprocess.run(
           ["bash", str(script_path), "status", "dev-1"],
           capture_output=True,
@@ -1669,36 +1706,20 @@ fi
       data = json.loads(result.stdout)
       self.assertEqual(data["player"], "Spotify")
       self.assertEqual(data["playerList"], ["Spotify", "VLC"])
-      self.assertTrue(set_log.exists())
-      self.assertIn("Spotify", set_log.read_text())
-      if set_log.exists():
-        set_log.unlink()
+      calls = read_busctl_calls(log_path)
+      assert_busctl_argv_clean(self, calls)
+      self.assertEqual(calls[-1], [
+          "--user", "set-property", "org.kde.kdeconnect",
+          "/modules/kdeconnect/devices/dev-1/mprisremote",
+          "org.kde.kdeconnect.device.mprisremote", "player", "s", "Spotify",
+      ])
 
-    # Case 2: Multiline title and multiline playerList
+    # Case 2: Multiline title survives verbatim out of structured JSON
     with tempfile.TemporaryDirectory() as tmp:
       stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text(r"""#!/usr/bin/env bash
-case "$*" in
-  *GetAll*) cat << 'EOF'
-({
-  'album': <'Live Concert'>,
-  'artist': <'The Beatles'>,
-  'isPlaying': <true>,
-  'player': <'Spotify'>,
-  'playerList': <[
-    'Spotify',
-    'Audacious'
-  ]>,
-  'title': <'A Day In The Life
-(Take 1)'>
-},)
-EOF
-  ;;
-  *) printf "(<' '>,)\n" ;;
-esac
-""")
-      _ = gdbus.chmod(0o755)
+      write_busctl_stub(stub_dir, [
+          ("*mprisremote*GetAll*", FIXTURES / "busctl-mpris-getall-hostile.json"),
+      ])
       result = subprocess.run(
           ["bash", str(script_path), "status", "dev-1"],
           capture_output=True,
@@ -1708,9 +1729,34 @@ esac
       )
       self.assertEqual(result.returncode, 0, result.stderr)
       data = json.loads(result.stdout)
-      self.assertTrue(data["isPlaying"])
-      self.assertEqual(data["title"], "A Day In The Life\n(Take 1)")
-      self.assertEqual(data["playerList"], ["Spotify", "Audacious"])
+      self.assertFalse(data["isPlaying"])
+      self.assertEqual(data["title"], "Don't \"Quit\" <b>NOW</b>\n(Take 2)")
+      self.assertEqual(data["playerList"], ["Spotify", "Don't Stop"])
+
+    # Case 3: Empty playerList with no player stays empty (no autoselect write)
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      log_path = stub_dir / "busctl.log"
+      write_busctl_stub(stub_dir, [
+          ("*mprisremote*GetAll*", FIXTURES / "busctl-mpris-getall-empty-players.json"),
+      ], log_path)
+      result = subprocess.run(
+          ["bash", str(script_path), "status", "dev-1"],
+          capture_output=True,
+          text=True,
+          check=False,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(result.returncode, 0, result.stderr)
+      data = json.loads(result.stdout)
+      self.assertEqual(data["player"], "")
+      self.assertEqual(data["playerList"], [])
+      self.assertEqual(read_busctl_calls(log_path), [[
+          "--user", "--json=short", "call", "org.kde.kdeconnect",
+          "/modules/kdeconnect/devices/dev-1/mprisremote",
+          "org.freedesktop.DBus.Properties", "GetAll", "s",
+          "org.kde.kdeconnect.device.mprisremote",
+      ]])
 
 
   def test_custom_address_update_add_and_remove(self):
@@ -1720,34 +1766,46 @@ esac
     self.assertEqual(subprocess.run([BASH, str(script), "invalid", "100.64.0.1"], capture_output=True).returncode, 64)
     # Invalid IP address syntax
     self.assertEqual(subprocess.run([BASH, str(script), "add", "bad/ip addr"], capture_output=True).returncode, 64)
-
-    # Successful add and remove via D-Bus / busctl
-    with tempfile.TemporaryDirectory() as tmp:
-      stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text("#!/usr/bin/env bash\nprintf \"(<['100.64.0.1']>,)\\n\"\n")
-      gdbus.chmod(0o755)
-      busctl = stub_dir / "busctl"
-      busctl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\"\n")
-      busctl.chmod(0o755)
-
-      res_add = subprocess.run(
+    # Missing dependency exits 127
+    with tempfile.TemporaryDirectory() as empty_dir:
+      res_dep = subprocess.run(
           [BASH, str(script), "add", "100.64.0.2"],
           capture_output=True,
-          text=True,
-          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+          env={**os.environ, "PATH": empty_dir},
       )
-      self.assertEqual(res_add.returncode, 0)
-      self.assertIn("customDevices as 2 100.64.0.1 100.64.0.2", res_add.stdout)
-
-      res_remove = subprocess.run(
-          [BASH, str(script), "remove", "100.64.0.1"],
+      self.assertEqual(res_dep.returncode, 127)
+    # D-Bus read failure exits 69
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      write_busctl_stub(stub_dir, [("*get-property*customDevices*", None)])
+      res_dbus = subprocess.run(
+          [BASH, str(script), "add", "100.64.0.2"],
           capture_output=True,
-          text=True,
           env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
       )
+      self.assertEqual(res_dbus.returncode, 69)
+
+    # Successful add and remove via busctl get-property + set-property
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      log_path = stub_dir / "busctl.log"
+      write_busctl_stub(stub_dir, [
+          ("*set-property*customDevices*", ""),
+          ("*get-property*customDevices*", FIXTURES / "busctl-custom-devices.json"),
+      ], log_path)
+      env = {**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"}
+
+      res_add = subprocess.run([BASH, str(script), "add", "100.64.0.2"], capture_output=True, text=True, env=env)
+      self.assertEqual(res_add.returncode, 0)
+      self.assertEqual(read_busctl_calls(log_path)[-1][5:], [
+          "customDevices", "as", "2", "100.64.0.1", "100.64.0.2"])
+
+      log_path.unlink()
+      res_remove = subprocess.run([BASH, str(script), "remove", "100.64.0.1"], capture_output=True, text=True, env=env)
       self.assertEqual(res_remove.returncode, 0)
-      self.assertIn("customDevices as 0", res_remove.stdout)
+      self.assertEqual(read_busctl_calls(log_path)[-1][5:], [
+          "customDevices", "as", "0"])
+      assert_busctl_argv_clean(self, read_busctl_calls(log_path))
 
   def test_discover_devices_end_to_end(self):
     script = ROOT / "scripts" / "discover_devices.sh"
@@ -1760,9 +1818,9 @@ esac
     # Daemon not running exits 69
     with tempfile.TemporaryDirectory() as tmp:
       stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text("#!/usr/bin/env bash\nprintf '(false,)\\n'\n")
-      gdbus.chmod(0o755)
+      write_busctl_stub(stub_dir, [
+          ("*NameHasOwner*", FIXTURES / "busctl-namehasowner-false.json"),
+      ])
       res_offline = subprocess.run(
           [BASH, str(script)],
           capture_output=True,
@@ -1770,40 +1828,33 @@ esac
       )
       self.assertEqual(res_offline.returncode, 69)
 
+    # Malformed daemon.devices reply exits 70
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      write_busctl_stub(stub_dir, [
+          ("*NameHasOwner*", FIXTURES / "busctl-namehasowner-true.json"),
+          ("*daemon devices*", FIXTURES / "busctl-devices-truncated.json"),
+      ])
+      res_malformed = subprocess.run(
+          [BASH, str(script)],
+          capture_output=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(res_malformed.returncode, 70)
+
     # Full discovery produces valid formatted output
     with tempfile.TemporaryDirectory() as tmp:
       stub_dir = Path(tmp)
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text(r"""#!/usr/bin/env bash
-if [[ "$*" == *NameHasOwner* ]]; then
-  printf '(true,)\n'
-elif [[ "$*" == *daemon.devices* ]]; then
-  printf "(['dev-1'],)\n"
-elif [[ "$*" == *customDevices* ]]; then
-  printf "(<['100.64.0.5']>,)\n"
-elif [[ "$*" == *name* ]]; then
-  printf "(<'My Phone'>,)\n"
-elif [[ "$*" == *type* ]]; then
-  printf "(<'phone'>,)\n"
-elif [[ "$*" == *isPaired* ]]; then
-  printf "(<true>,)\n"
-elif [[ "$*" == *isReachable* ]]; then
-  printf "(<true>,)\n"
-elif [[ "$*" == *supportedPlugins* ]]; then
-  printf "(<['kdeconnect_battery', 'kdeconnect_ping']>,)\n"
-elif [[ "$*" == *battery*charge* ]]; then
-  printf "(<85>,)\n"
-elif [[ "$*" == *battery*isCharging* ]]; then
-  printf "(<true>,)\n"
-elif [[ "$*" == *networkType* ]]; then
-  printf "(<'WiFi'>,)\n"
-elif [[ "$*" == *cellularNetworkStrength* ]]; then
-  printf "(<3>,)\n"
-else
-  printf "(<false>,)\n"
-fi
-""")
-      gdbus.chmod(0o755)
+      log_path = stub_dir / "busctl.log"
+      # Route order matters: sub-objects must match before the bare device.
+      write_busctl_stub(stub_dir, [
+          ("*NameHasOwner*", FIXTURES / "busctl-namehasowner-true.json"),
+          ("*get-property*customDevices*", FIXTURES / "busctl-custom-devices.json"),
+          ("*devices/dev-1/battery*", FIXTURES / "busctl-battery-getall.json"),
+          ("*devices/dev-1/connectivity_report*", FIXTURES / "busctl-connectivity-getall.json"),
+          ("*devices/dev-1*GetAll*", FIXTURES / "busctl-device-getall.json"),
+          ("*daemon devices*", FIXTURES / "busctl-devices.json"),
+      ], log_path)
       kdeconnect_cli = stub_dir / "kdeconnect-cli"
       kdeconnect_cli.write_text("#!/usr/bin/env bash\nexit 0\n")
       kdeconnect_cli.chmod(0o755)
@@ -1818,7 +1869,7 @@ fi
       self.assertEqual(result.returncode, 0)
       lines = result.stdout.splitlines()
       self.assertIn("CUSTOM_ADDRESSES_READY", lines)
-      self.assertIn("CUSTOM_ADDRESS\t100.64.0.5", lines)
+      self.assertIn("CUSTOM_ADDRESS\t100.64.0.1", lines)
 
       device_line = next(line for line in lines if line.startswith("DEVICE\t"))
       device = parse_device(device_line)
@@ -1827,43 +1878,108 @@ fi
       self.assertEqual(device["name"], "My Phone")
       self.assertEqual(device["battery"], 85)
       self.assertTrue(device["charging"])
+      self.assertEqual(device["networkType"], "LTE")
+      self.assertEqual(device["networkStrength"], 3)
       self.assertTrue(device["capabilities"]["battery"])
       self.assertTrue(device["capabilities"]["ping"])
+      self.assertTrue(device["capabilities"]["network"])
+      self.assertTrue(device["capabilities"]["media"])
+
+      # Structured transport: one GetAll per device instead of N Get calls,
+      # and every argv element is bare data (no quoting payloads).
+      calls = read_busctl_calls(log_path)
+      assert_busctl_argv_clean(self, calls)
+      self.assertIn([
+          "--user", "--json=short", "call", "org.kde.kdeconnect",
+          "/modules/kdeconnect/devices/dev-1",
+          "org.freedesktop.DBus.Properties", "GetAll", "s",
+          "org.kde.kdeconnect.device",
+      ], calls)
+      self.assertEqual(len([c for c in calls if "GetAll" in c]), 3)
+
+  def test_discover_devices_hostile_name_cannot_forge_records(self):
+    script = ROOT / "scripts" / "discover_devices.sh"
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      write_busctl_stub(stub_dir, [
+          ("*NameHasOwner*", FIXTURES / "busctl-namehasowner-true.json"),
+          ("*get-property*customDevices*", FIXTURES / "busctl-custom-devices-empty.json"),
+          ("*battery*", FIXTURES / "busctl-battery-getall.json"),
+          ("*connectivity_report*", FIXTURES / "busctl-connectivity-getall.json"),
+          ("*GetAll*", FIXTURES / "busctl-device-getall-hostile.json"),
+          ("*daemon devices*", json.dumps({"type": "as", "data": [["evil-1"]]})),
+      ])
+      result = subprocess.run(
+          [BASH, str(script)],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+
+    self.assertEqual(result.returncode, 0, result.stderr)
+    device_lines = [line for line in result.stdout.splitlines() if line.startswith("DEVICE\t")]
+    # A name full of tabs, newlines and markup stays ONE 14-field record.
+    self.assertEqual(len(device_lines), 1)
+    self.assertEqual(len(device_lines[0].split("\t")), 14)
+    device = parse_device(device_lines[0])
+    self.assertEqual(device["id"], "evil-1")
+    self.assertEqual(device["name"], "Evil <[]> Name Second Row")
+    self.assertEqual(device["verificationKey"], "EVIL KEY !")
+    self.assertTrue(device["capabilities"]["battery"])
+    self.assertTrue(device["pairRequested"])
 
   def test_media_control_action_and_player_dispatch(self):
     script = ROOT / "scripts" / "media_control.sh"
     with tempfile.TemporaryDirectory() as tmp:
       stub_dir = Path(tmp)
       log_path = Path(tmp) / "calls.log"
-      gdbus = stub_dir / "gdbus"
-      gdbus.write_text(f"#!/usr/bin/env bash\necho \"$*\" >> {log_path}\nexit 0\n")
-      gdbus.chmod(0o755)
+      write_busctl_stub(stub_dir, [("*", "")], log_path)
+      env = {**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"}
 
-      res_action = subprocess.run(
-          [BASH, str(script), "action", "dev-1", "PlayPause"],
-          capture_output=True,
-          text=True,
-          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
-      )
-      res_player = subprocess.run(
-          [BASH, str(script), "player", "dev-1", "Spotify"],
-          capture_output=True,
-          text=True,
-          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
-      )
+      res_action = subprocess.run([BASH, str(script), "action", "dev-1", "PlayPause"], capture_output=True, text=True, env=env)
+      # A player name with an apostrophe and a space killed the old gdbus
+      # escaper; as a bare argv element it is trivially safe.
+      res_player = subprocess.run([BASH, str(script), "player", "dev-1", "Don't Stop"], capture_output=True, text=True, env=env)
       self.assertEqual(res_action.returncode, 0)
       self.assertEqual(res_player.returncode, 0)
-      log = log_path.read_text()
-      self.assertIn("mprisremote.sendAction PlayPause", log)
-      self.assertIn("Properties.Set org.kde.kdeconnect.device.mprisremote player <'Spotify'>", log)
+      calls = read_busctl_calls(log_path)
+      assert_busctl_argv_clean(self, calls)
+      self.assertIn([
+          "--user", "call", "org.kde.kdeconnect",
+          "/modules/kdeconnect/devices/dev-1/mprisremote",
+          "org.kde.kdeconnect.device.mprisremote", "sendAction", "s", "PlayPause",
+      ], calls)
+      self.assertIn([
+          "--user", "set-property", "org.kde.kdeconnect",
+          "/modules/kdeconnect/devices/dev-1/mprisremote",
+          "org.kde.kdeconnect.device.mprisremote", "player", "s", "Don't Stop",
+      ], calls)
+
+      # D-Bus failure on a mutating op exits 69
+      write_busctl_stub(stub_dir, [("*", None)])
+      res_fail = subprocess.run([BASH, str(script), "action", "dev-1", "PlayPause"], capture_output=True, text=True, env=env)
+      self.assertEqual(res_fail.returncode, 69)
 
   def test_open_sms_script_execution(self):
     script = ROOT / "scripts" / "open_sms.sh"
 
-    # Missing binary exits 127
+    # Malformed device ids are usage errors (64) even when kdeconnect-sms is
+    # missing: validation runs before the existence check, mirroring
+    # media_control.sh. Empty id keeps launching without --device.
+    for bad_id in ("dev/bad", "dev bad", "dev\tbad", "dev\nbad"):
+      res_bad = subprocess.run(
+          [BASH, str(script), bad_id],
+          capture_output=True,
+          env={**os.environ, "PATH": ""},
+      )
+      self.assertEqual(res_bad.returncode, 64, repr(bad_id))
+
+    # Missing binary exits 127 (no id and valid id alike)
     with tempfile.TemporaryDirectory() as empty_dir:
       res_missing = subprocess.run([BASH, str(script)], capture_output=True, env={**os.environ, "PATH": empty_dir})
       self.assertEqual(res_missing.returncode, 127)
+      res_missing_id = subprocess.run([BASH, str(script), "dev-42"], capture_output=True, env={**os.environ, "PATH": empty_dir})
+      self.assertEqual(res_missing_id.returncode, 127)
 
     # Available binary runs with device argument
     with tempfile.TemporaryDirectory() as tmp:
@@ -1886,6 +2002,16 @@ fi
 
       self.assertEqual(res.returncode, 0)
       self.assertEqual(log_path.read_text().strip(), "--device dev-42")
+
+      # A malformed id never launches the app even when the binary exists
+      log_path.unlink()
+      res_bad = subprocess.run(
+          [BASH, str(script), "dev/bad"],
+          capture_output=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(res_bad.returncode, 64)
+      self.assertFalse(log_path.exists())
 
   def test_open_app_script_execution(self):
     script = ROOT / "scripts" / "open_app.sh"
@@ -1948,7 +2074,7 @@ class QmlWiringAndContractTests(unittest.TestCase):
     self.assertIn('customAddressesReady', controller)
     self.assertIn('getAddressScriptPath()', controller)
     self.assertIn('customDevices as', address_script)
-    self.assertIn('Properties.Get', address_script)
+    self.assertIn('get-property', address_script)
     self.assertIn('set-property', address_script)
     self.assertIn('CUSTOM_ADDRESSES_READY', discovery)
     self.assertIn('CUSTOM_ADDRESS\\t%s', discovery)
@@ -2114,7 +2240,12 @@ class QmlWiringAndContractTests(unittest.TestCase):
 
   def test_discovery_script_reachability_verification(self):
     discovery_source = (ROOT / "scripts" / "discover_devices.sh").read_text()
-    self.assertIn("org.kde.kdeconnect.device isReachable", discovery_source)
+    report_source = (ROOT / "scripts" / "discover_report.py").read_text()
+    # Reachability is read from the org.kde.kdeconnect.device isReachable
+    # D-Bus property (one GetAll per device), never probed directly.
+    self.assertIn("org.freedesktop.DBus.Properties", discovery_source)
+    self.assertIn("GetAll", discovery_source)
+    self.assertIn('"isReachable"', report_source)
     self.assertNotIn("is_address_reachable()", discovery_source)
     self.assertNotIn("/dev/tcp", discovery_source)
 
