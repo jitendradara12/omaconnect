@@ -22,6 +22,9 @@ Column {
     PanelSeparator { foreground: root.foreground }
 
     PanelSectionHeader {
+        // Shell-owned component fed by device.type: the stock shell renders
+        // section headers as PlainText already; only a non-stock host is
+        // outside this repo's control.
         text: (root.device && root.device.type && root.device.type !== "unknown") ? (root.device.type.toUpperCase() + " ACTIONS") : "ACTIONS"
         foreground: root.foreground
         fontFamily: root.fontFamily
@@ -99,6 +102,7 @@ Column {
                     spacing: Style.space(6)
 
                     Text {
+                        textFormat: Text.PlainText
                         visible: actionSurface.actionIcon !== ""
                         text: actionSurface.actionIcon
                         color: actionSurface.current ? Color.accent : root.foreground
@@ -109,6 +113,8 @@ Column {
 
                     Text {
                         id: actionBtnText
+                        // Device-controlled string: PlainText so markup in a device-derived label is displayed, never parsed
+                        textFormat: Text.PlainText
                         text: actionSurface.actionName
                         color: root.foreground
                         font.family: root.fontFamily

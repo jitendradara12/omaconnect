@@ -55,6 +55,7 @@ Column {
                 spacing: Style.space(6)
 
                 Text {
+                    textFormat: Text.PlainText
                     text: panel.commandsExpanded ? "󰅀" : "󰅂"
                     color: root.foreground
                     font.family: root.fontFamily
@@ -89,6 +90,7 @@ Column {
         spacing: Style.space(6)
 
         Text {
+            textFormat: Text.PlainText
             visible: !!root.service && root.service.commandsLoading
             text: "Loading commands..."
             color: Qt.darker(root.foreground, 1.4)
@@ -97,6 +99,7 @@ Column {
         }
 
         Text {
+            textFormat: Text.PlainText
             visible: !!root.service && !root.service.commandsLoading && (!root.service.remoteCommands || root.service.remoteCommands.length === 0)
             text: "No remote commands configured"
             color: Qt.darker(root.foreground, 1.4)
@@ -139,6 +142,7 @@ Column {
                     spacing: Style.space(6)
 
                     Text {
+                        textFormat: Text.PlainText
                         text: "󰘳"
                         color: Qt.darker(root.foreground, 1.4)
                         font.family: root.fontFamily
@@ -148,6 +152,8 @@ Column {
 
                     Text {
                         id: cmdBtnText
+                        // Device-controlled string: PlainText so markup in a remote command name is displayed, never parsed
+                        textFormat: Text.PlainText
                         text: cmdSurface.modelData ? cmdSurface.modelData.name : ""
                         color: root.foreground
                         font.family: root.fontFamily
