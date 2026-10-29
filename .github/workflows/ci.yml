@@ -20,24 +20,35 @@ name: CI
 
 on: [push, pull_request]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      # Optional tooling. continue-on-error: if the packages cannot be
-      # installed, validate.sh availability-checks each tool and skips its
-      # stage, and the belt-and-braces steps below still run the tests.
-      # qml6-module-* let qmllint resolve QtQuick/Controls/Layouts instead of
-      # drowning in unresolved-import diagnostics.
+      # Required test dependency, no continue-on-error: the base scripts'
+      # gdbus dependency check must behave as on an Omarchy host, or the
+      # validation-argument tests (expecting exit 64, not 127) fail red.
+      - name: Install required test dependencies (gdbus)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libglib2.0-bin
+
+      # Optional tooling. If these cannot be installed, validate.sh
+      # availability-checks each tool and skips its stage, and the
+      # belt-and-braces steps below still run the tests. qml6-module-*
+      # let qmllint resolve QtQuick/Controls/Layouts instead of drowning in
+      # unresolved-import diagnostics.
       - name: Install optional tools (shellcheck, qmllint, QML modules)
         continue-on-error: true
         run: |
-          sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck qt6-declarative-dev-tools \
-            libglib2.0-bin \
             qml6-module-qtquick qml6-module-qtquick-controls \
             qml6-module-qtquick-layouts qml6-module-qtquick-window \
             qml6-module-qtquick-templates
@@ -47,13 +58,15 @@ jobs:
           echo "/usr/lib/qt6/bin" >> "$GITHUB_PATH"
 
       # The Omarchy shell QML (qs.Ui / qs.Commons types) so qmllint can
-      # resolve the plugin's imports. Cloned, not installed: the runner is
-      # not an Omarchy machine. OMARCHY_SHELL_PATH (not OMARCHY_PATH) so the
-      # optional plugin-validator stage is not armed by accident.
+      # resolve the plugin's imports. Cloned, never executed — it only feeds
+      # three -I import paths to qmllint. OMARCHY_SHELL_PATH (not
+      # OMARCHY_PATH) so the optional plugin-validator stage is not armed by
+      # accident. Branch pinned so lint imports do not drift with the
+      # default branch.
       - name: Omarchy shell QML for import paths
         continue-on-error: true
         run: |
-          git clone --depth 1 https://github.com/omacom/omarchy /tmp/omarchy
+          git clone --depth 1 --branch quattro https://github.com/omacom/omarchy /tmp/omarchy
           echo "OMARCHY_SHELL_PATH=/tmp/omarchy/shell" >> "$GITHUB_ENV"
 
       - name: validate.sh (all stages)

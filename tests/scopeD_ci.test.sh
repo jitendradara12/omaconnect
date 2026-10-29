@@ -71,6 +71,7 @@ for tool in bash sh env python3 nohup awk gdbus busctl dirname basename \
 done
 validate_out="$tmp/validate.out"
 if PATH="$restricted_bin" QMLLINT="$tmp/no-qmllint-here" OMARCHY_PATH="" \
+    OMARCHY_SHELL_PATH="" \
     OMACONNECT_SKIP_BASH_TESTS=1 SCOPED_CI_NESTED=1 bash scripts/validate.sh >"$validate_out" 2>&1; then
     validate_status=0
 else

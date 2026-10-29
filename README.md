@@ -90,7 +90,7 @@ omarchy plugin remove omaconnect
 
 ## Development / running tests
 
-Run the full validation pipeline (python unit tests, bash tests, shell syntax, and the optional shellcheck/qmllint stages when those tools are installed):
+Run the full validation pipeline (python unit tests, bash tests, shell syntax, the advisory shellcheck stage, the Omarchy plugin validator when present, and qmllint when installed):
 
 ```bash
 bash scripts/validate.sh

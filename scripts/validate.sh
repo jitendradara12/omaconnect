@@ -141,10 +141,9 @@ if [ -n "$qmllint_cmd" ]; then
         printf '%s\n' "note: $omarchy_shell not found; linting without Omarchy imports may add warnings"
     fi
 
-    qml_files=(Service.qml BarWidget.qml KdeConnectController.qml)
-    if [ -f Panel.qml ]; then qml_files+=(Panel.qml); fi
-    for file in components/*.qml; do
-        if [ -f "$file" ]; then qml_files+=("$file"); fi
+    qml_files=()
+    for file in ./*.qml components/*.qml bridge/*.qml; do
+        [ -f "$file" ] && qml_files+=("$file")
     done
 
     "$qmllint_cmd" -I "$omarchy_shell" \
@@ -158,11 +157,15 @@ if [ -n "$qmllint_cmd" ]; then
     # reported, while others exit 0 for the same output. A line starting with
     # "Error:" is a real syntax/type failure and always fails the stage;
     # warning-only output passes (informational, never claimed warning-free).
-    error_count="$(grep -c '^Error:' "$qml_output" || true)"
-    if [ "${error_count:-0}" -gt 0 ]; then
+    # One guard on the exit code: non-zero with NO diagnostics means the
+    # linter itself failed (crash, bad invocation) — that must never pass.
+    if [ "$status" -ne 0 ] && [ ! -s "$qml_output" ]; then
+        printf '%s\n' "[6/${total_stages}] FAIL qmllint exited $status with no output (linter failure?)"
+        failed_stages+=(6)
+    elif grep -q '^Error:' "$qml_output"; then
+        error_count="$(grep -c '^Error:' "$qml_output" || true)"
         printf '%s\n' "[6/${total_stages}] FAIL qmllint reported $error_count error(s); runtime loader checks are also required"
-        grep '^Error:' "$qml_output" | head -20
-        cat "$qml_output" >&2
+        sed -n '1,40p' "$qml_output" >&2 || true
         failed_stages+=(6)
     elif grep -q 'Warning:' "$qml_output"; then
         printf '%s\n' "[6/${total_stages}] PASS qmllint emitted host-import/unqualified-type diagnostics; not claimed warning-free"
