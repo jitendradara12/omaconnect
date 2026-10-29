@@ -244,7 +244,7 @@ Column {
 
                                 PanelToolTip {
                                     visible: chipMouseArea.containsMouse && !isCurrent
-                                    // Shell-owned tooltip: the remote player name cannot be set to PlainText from this plugin
+                                    // Shell-owned tooltip: the stock shell renders this PlainText already; only a non-stock host is uncontrolled
                                     text: "Switch to " + modelData
                                     fontFamily: root.fontFamily
                                 }

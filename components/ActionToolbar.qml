@@ -22,8 +22,9 @@ Column {
     PanelSeparator { foreground: root.foreground }
 
     PanelSectionHeader {
-        // Shell-owned component: device.type comes from the remote device, but its
-        // internal Text cannot be set to PlainText from this plugin.
+        // Shell-owned component fed by device.type: the stock shell renders
+        // section headers as PlainText already; only a non-stock host is
+        // outside this repo's control.
         text: (root.device && root.device.type && root.device.type !== "unknown") ? (root.device.type.toUpperCase() + " ACTIONS") : "ACTIONS"
         foreground: root.foreground
         fontFamily: root.fontFamily

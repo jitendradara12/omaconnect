@@ -49,7 +49,14 @@ DEVICE_DERIVED_TRIGGERS = [
 ]
 
 TEXT_BLOCK_START = re.compile(r"^\s*Text\s*\{")
+# Also catch a Text nested on a property-binding line, e.g.
+# `contentItem: Text { ... }` (patterns used by the Omarchy shell).
+TEXT_BLOCK_START_INLINE = re.compile(r"\w[:.]\s*Text\s*\{")
 PROPERTY_LINE = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*:(?!:)")
+# Commented-out lines (e.g. `// textFormat: Text.PlainText`) must not count
+# as carrying the property; the property may sit on its own line or inline
+# after `{`, `;` or `,` in a single-line Text block.
+PLAINTEXT_PROPERTY = re.compile(r"(?:^\s*|[;,{]\s*)textFormat\s*:\s*Text\.PlainText\s*(?:[;}]|$)")
 
 
 def strip_line_comment(line):
@@ -68,13 +75,18 @@ def find_text_blocks(source):
     Each block is reported as {"start", "end", "source"} with 1-based line
     numbers; `end` is the line whose closing brace returns the depth to the
     level the block started at. Braces inside // comments are ignored.
+    Note: brace counting is not string-literal aware, so a literal "}" or
+    "{" inside a string skews depth — no owned file contains one today.
     """
     lines = source.splitlines()
     blocks = []
     depth = 0
     index = 0
     while index < len(lines):
-        if TEXT_BLOCK_START.match(lines[index]):
+        if TEXT_BLOCK_START.match(lines[index]) or (
+            TEXT_BLOCK_START_INLINE.search(strip_line_comment(lines[index]))
+            and not lines[index].strip().startswith("//")
+        ):
             base_depth = depth
             start = index
             end = index
@@ -82,7 +94,10 @@ def find_text_blocks(source):
                 code = strip_line_comment(lines[index])
                 depth += code.count("{") - code.count("}")
                 end = index
-                if depth <= base_depth and index > start:
+                # depth returns to base either on the block's closing line
+                # or on a same-line-open-and-close block (Text { ... } on one
+                # line) — both end the block.
+                if depth <= base_depth:
                     break
                 index += 1
             blocks.append(
@@ -96,12 +111,16 @@ def find_text_blocks(source):
 
 
 def text_binding(block_source):
-    """Extract the source of the `text:` binding (including multi-line bindings)."""
+    """Extract the source of the `text:` binding (including multi-line bindings).
+
+    A single-line `Text { text: ... }` carries the binding inline, so the
+    collection trigger also matches `text:` after `{` or `,`.
+    """
     lines = block_source.splitlines()
     binding_lines = []
     collecting = False
     for line in lines:
-        if not collecting and re.match(r"^\s*text\s*:", line):
+        if not collecting and re.search(r"(?:^\s*|[,{]\s*)text\s*:", line):
             collecting = True
             binding_lines.append(line)
             continue
@@ -120,11 +139,19 @@ def binds_device_derived_value(block_source):
     return any(re.search(trigger, binding) for trigger in DEVICE_DERIVED_TRIGGERS)
 
 
+def has_plaintext_property(block_source):
+    """True when a real (non-commented) textFormat: Text.PlainText line exists."""
+    for line in block_source.splitlines():
+        if PLAINTEXT_PROPERTY.search(strip_line_comment(line).rstrip()):
+            return True
+    return False
+
+
 def find_missing_plaintext(source):
     """Text blocks that bind device-derived values but lack textFormat: PlainText."""
     missing = []
     for block in find_text_blocks(source):
-        if binds_device_derived_value(block["source"]) and PLAINTEXT_LINE not in block["source"]:
+        if binds_device_derived_value(block["source"]) and not has_plaintext_property(block["source"]):
             missing.append(block)
     return missing
 
@@ -155,6 +182,42 @@ Column {
         self.assertEqual(len(missing), 1)
         self.assertIn("deviceName", text_binding(missing[0]["source"]))
         self.assertNotIn(PLAINTEXT_LINE, missing[0]["source"])
+
+    def test_scanner_flags_commented_out_property_and_inline_blocks(self):
+        """A commented-out textFormat line must not count as the property, a
+        single-line Text block must be scanned as a block, and a Text nested
+        on a property line (contentItem: Text {...}) must be found."""
+        snippet = """
+Column {
+    Text {
+        text: root.deviceName
+        // textFormat: Text.PlainText
+    }
+
+    Text { text: root.trackTitle }
+
+    contentItem: Text { text: root.trackArtist }
+}
+"""
+        blocks = find_text_blocks(snippet)
+        self.assertEqual(len(blocks), 3)
+        missing = find_missing_plaintext(snippet)
+        self.assertEqual(len(missing), 3)
+        self.assertFalse(has_plaintext_property(missing[0]["source"]))
+        # Hardened twins of the same three shapes must not be flagged.
+        hardened = """
+Column {
+    Text {
+        text: root.deviceName
+        textFormat: Text.PlainText
+    }
+
+    Text { text: root.trackTitle; textFormat: Text.PlainText }
+
+    contentItem: Text { text: root.trackArtist; textFormat: Text.PlainText }
+}
+"""
+        self.assertEqual(find_missing_plaintext(hardened), [])
 
     def test_scanner_handles_nested_braces_and_multiline_bindings(self):
         """Brace tracking must survive a multi-line JS binding: the unhardened
@@ -206,11 +269,26 @@ class DeviceDerivedBindingsArePlainTextTests(unittest.TestCase):
         for path in OWNED_QML_FILES:
             with self.subTest(file=path):
                 for block in find_text_blocks(load(path)):
-                    self.assertIn(
-                        PLAINTEXT_LINE,
-                        block["source"],
+                    self.assertTrue(
+                        has_plaintext_property(block["source"]),
                         f"{path}: Text block at line {block['start']} lacks {PLAINTEXT_LINE}",
                     )
+
+    def test_no_device_derived_binding_without_plaintext_anywhere_in_repo(self):
+        """The trigger layer guards every QML file in the repo, not only the
+        files this PR hardened — a new file or an inline contentItem Text
+        binding a device value without the property fails here."""
+        qml_files = sorted(str(p.relative_to(ROOT)) for p in ROOT.glob("**/*.qml"))
+        self.assertTrue(qml_files, "no QML files found — scanner is broken")
+        for path in qml_files:
+            with self.subTest(file=path):
+                missing = find_missing_plaintext(load(path))
+                self.assertEqual(
+                    missing,
+                    [],
+                    f"{path}: Text blocks at lines {[b['start'] for b in missing]} "
+                    "bind device-derived values without textFormat: Text.PlainText",
+                )
 
 
 class StrictRegressionPinsTests(unittest.TestCase):
@@ -220,7 +298,7 @@ class StrictRegressionPinsTests(unittest.TestCase):
             if "Pairing request from" in b["source"]
         ]
         self.assertEqual(len(blocks), 1)
-        self.assertIn(PLAINTEXT_LINE, blocks[0]["source"])
+        self.assertTrue(has_plaintext_property(blocks[0]["source"]))
 
     def test_device_section_verification_key_block_is_pinned_plaintext(self):
         blocks = [
@@ -228,7 +306,7 @@ class StrictRegressionPinsTests(unittest.TestCase):
             if "verificationKey" in text_binding(b["source"])
         ]
         self.assertEqual(len(blocks), 1)
-        self.assertIn(PLAINTEXT_LINE, blocks[0]["source"])
+        self.assertTrue(has_plaintext_property(blocks[0]["source"]))
 
     def test_device_section_model_data_name_block_is_pinned_plaintext(self):
         blocks = [
@@ -236,7 +314,7 @@ class StrictRegressionPinsTests(unittest.TestCase):
             if re.search(r"\bmodelData\.name\b", text_binding(b["source"]))
         ]
         self.assertEqual(len(blocks), 1)
-        self.assertIn(PLAINTEXT_LINE, blocks[0]["source"])
+        self.assertTrue(has_plaintext_property(blocks[0]["source"]))
 
     def test_media_player_track_title_block_is_pinned_plaintext(self):
         blocks = [
@@ -245,7 +323,7 @@ class StrictRegressionPinsTests(unittest.TestCase):
         ]
         self.assertEqual(len(blocks), 2)  # collapsed bar title + expanded card title
         for block in blocks:
-            self.assertIn(PLAINTEXT_LINE, block["source"])
+            self.assertTrue(has_plaintext_property(block["source"]))
 
     def test_media_player_track_artist_and_album_block_is_pinned_plaintext(self):
         blocks = [
@@ -254,7 +332,7 @@ class StrictRegressionPinsTests(unittest.TestCase):
         ]
         self.assertEqual(len(blocks), 2)  # collapsed bar "title • artist" + expanded artist/album
         for block in blocks:
-            self.assertIn(PLAINTEXT_LINE, block["source"])
+            self.assertTrue(has_plaintext_property(block["source"]))
             self.assertRegex(text_binding(block["source"]), r"trackAlbum|trackArtist")
 
 
