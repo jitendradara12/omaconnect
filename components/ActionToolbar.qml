@@ -22,6 +22,8 @@ Column {
     PanelSeparator { foreground: root.foreground }
 
     PanelSectionHeader {
+        // Shell-owned component: device.type comes from the remote device, but its
+        // internal Text cannot be set to PlainText from this plugin.
         text: (root.device && root.device.type && root.device.type !== "unknown") ? (root.device.type.toUpperCase() + " ACTIONS") : "ACTIONS"
         foreground: root.foreground
         fontFamily: root.fontFamily
@@ -99,6 +101,7 @@ Column {
                     spacing: Style.space(6)
 
                     Text {
+                        textFormat: Text.PlainText
                         visible: actionSurface.actionIcon !== ""
                         text: actionSurface.actionIcon
                         color: actionSurface.current ? Color.accent : root.foreground
@@ -109,6 +112,8 @@ Column {
 
                     Text {
                         id: actionBtnText
+                        // Device-controlled string: PlainText so markup in a device-derived label is displayed, never parsed
+                        textFormat: Text.PlainText
                         text: actionSurface.actionName
                         color: root.foreground
                         font.family: root.fontFamily

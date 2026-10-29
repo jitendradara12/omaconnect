@@ -65,6 +65,7 @@ Column {
                 spacing: Style.space(6)
 
                 Text {
+                    textFormat: Text.PlainText
                     visible: root.showDeviceTypeIcons && !!(root.device && root.device.type && root.device.type !== "unknown")
                     text: root.service ? root.service.deviceTypeIcon(root.device ? root.device.type : "") : ""
                     color: (root.device && root.device.reachable) ? Color.accent : Qt.darker(root.foreground, 1.4)
@@ -74,6 +75,8 @@ Column {
                 }
 
                 Text {
+                    // Device-controlled string: PlainText so markup in a remote name is displayed, never parsed
+                    textFormat: Text.PlainText
                     text: root.device ? root.deviceName : "KDE Connect"
                     color: root.foreground
                     font.family: root.fontFamily
@@ -86,6 +89,7 @@ Column {
             }
 
             Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 text: {
                     if (!root.service) return "Service unavailable"
@@ -105,6 +109,7 @@ Column {
                 spacing: Style.space(6)
 
                 Text {
+                    textFormat: Text.PlainText
                     text: root.service ? ((root.showBattery && root.device && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0) ? root.service.deviceBatteryIcon(root.device) : root.service.deviceNetworkIcon(root.device)) : ""
                     color: (root.showBattery && root.device && root.device.capabilities && root.device.capabilities.battery && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
                         ? Color.urgent
@@ -115,6 +120,7 @@ Column {
                 }
 
                 Text {
+                    textFormat: Text.PlainText
                     text: root.service ? root.service.deviceBatteryText(root.device, root.showBattery, root.showNetwork) : ""
                     color: (root.showBattery && root.device && root.device.battery >= 0 && root.device.battery <= 20 && !(root.device.isCharging || root.device.charging))
                         ? Color.urgent
@@ -140,6 +146,7 @@ Column {
 
         Text {
             id: bannerText
+            textFormat: Text.PlainText
             anchors.left: parent.left
             anchors.right: dismissButton.left
             anchors.leftMargin: Style.space(10)
@@ -182,6 +189,7 @@ Column {
             }
 
             Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: "✕"
                 color: ((root.service && (root.service.actionError || root.service.fileTransferError)) || (root.panel && root.panel.composerError)) ? Color.urgent : root.foreground
@@ -210,6 +218,7 @@ Column {
             spacing: Style.space(6)
 
             Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 text: (panel.incomingRequest && panel.incomingRequest.name) ? "Pairing request from " + panel.incomingRequest.name : "Pairing request"
                 color: root.foreground
@@ -220,6 +229,7 @@ Column {
             }
 
             Text {
+                textFormat: Text.PlainText
                 visible: !!(panel.incomingRequest && panel.incomingRequest.verificationKey)
                 width: parent.width
                 text: "Verify on both devices: " + ((panel.incomingRequest && panel.incomingRequest.verificationKey) ? (root.service ? root.service.formatVerificationKey(panel.incomingRequest.verificationKey) : panel.incomingRequest.verificationKey) : "")
@@ -313,6 +323,7 @@ Column {
                     spacing: Style.space(8)
 
                     Text {
+                        textFormat: Text.PlainText
                         visible: root.showDeviceTypeIcons
                         text: (root.service && modelData) ? root.service.deviceTypeIcon(modelData.type) : "󰄜"
                         color: (modelData && modelData.paired && modelData.reachable) ? Color.accent : Qt.darker(root.foreground, 1.5)
@@ -328,6 +339,7 @@ Column {
 
                         Text {
                             id: nameText
+                            textFormat: Text.PlainText
                             text: (modelData && modelData.name) ? modelData.name : ""
                             color: root.foreground
                             font.family: root.fontFamily
@@ -338,6 +350,7 @@ Column {
                         }
 
                         Text {
+                            textFormat: Text.PlainText
                             visible: !!modelData && (!modelData.paired || !modelData.reachable)
                             text: (!modelData || !modelData.paired) ? "Unpaired" : "Offline"
                             color: Qt.darker(root.foreground, 1.5)
@@ -463,6 +476,7 @@ Column {
         width: parent.width
 
         Text {
+            textFormat: Text.PlainText
             text: {
                 if (root.service && root.service.scanning) return "Scanning..."
                 if (root.service && root.service.discoveryState === "not_installed") return "Required packages missing"
@@ -479,6 +493,7 @@ Column {
             spacing: Style.space(6)
 
             Text {
+                textFormat: Text.PlainText
                 text: "kdeconnect needed"
                 color: Qt.darker(root.foreground, 1.4)
                 font.family: root.fontFamily
@@ -501,6 +516,7 @@ Column {
             spacing: Style.space(6)
 
             Text {
+                textFormat: Text.PlainText
                 text: "daemon not running"
                 color: Qt.darker(root.foreground, 1.4)
                 font.family: root.fontFamily
@@ -523,6 +539,7 @@ Column {
             spacing: Style.space(6)
 
             Text {
+                textFormat: Text.PlainText
                 text: "Firewall blocking?"
                 color: Qt.darker(root.foreground, 1.4)
                 font.family: root.fontFamily

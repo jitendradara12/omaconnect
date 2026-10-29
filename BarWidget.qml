@@ -75,6 +75,10 @@ BarWidget {
                 ? root.service.deviceTypeIcon(root.device.type) : "󰄜"
             return root.showBarBattery ? (icon + " " + root.device.battery + "%") : icon
         }
+        // Device-controlled string limitation: root.deviceName comes from the remote
+        // device, but BarIconButton and its tooltip are shell components (qs.Ui /
+        // qs.Commons) outside this repo, so their textFormat cannot be set to
+        // PlainText from this plugin.
         tooltipText: {
             var showBat = !root.settings || root.settings.showBatteryStats !== false
             if (showBat && root.hasBattery) {

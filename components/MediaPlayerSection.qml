@@ -57,6 +57,7 @@ Column {
 
         Text {
             id: musicIcon
+            textFormat: Text.PlainText
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
             text: root.isPlaying ? "󰝚" : "󰎈"
@@ -67,6 +68,7 @@ Column {
 
         Text {
             id: chevronIcon
+            textFormat: Text.PlainText
             anchors.right: parent.right
             anchors.rightMargin: Style.space(2)
             anchors.verticalCenter: parent.verticalCenter
@@ -78,6 +80,8 @@ Column {
 
         Text {
             id: titleText
+            // Device-controlled string: PlainText so markup in a remote title is displayed, never parsed
+            textFormat: Text.PlainText
             anchors.left: musicIcon.right
             anchors.leftMargin: Style.space(6)
             anchors.right: chevronIcon.left
@@ -166,6 +170,7 @@ Column {
                     }
 
                     Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         visible: bgArt.status !== Image.Ready
                         text: "󰎈"
@@ -181,6 +186,7 @@ Column {
                     anchors.verticalCenter: parent.verticalCenter
 
                     Text {
+                        textFormat: Text.PlainText
                         width: parent.width
                         text: root.trackTitle
                         color: root.foreground
@@ -191,6 +197,7 @@ Column {
                     }
 
                     Text {
+                        textFormat: Text.PlainText
                         width: parent.width
                         visible: root.trackArtist !== "" || root.trackAlbum !== ""
                         text: {
@@ -204,6 +211,7 @@ Column {
                     }
 
                     Text {
+                        textFormat: Text.PlainText
                         width: parent.width
                         visible: !root.hasMedia
                         text: root.device && root.device.name ? "Open media on " + root.device.name : "No active player"
@@ -236,6 +244,7 @@ Column {
 
                                 PanelToolTip {
                                     visible: chipMouseArea.containsMouse && !isCurrent
+                                    // Shell-owned tooltip: the remote player name cannot be set to PlainText from this plugin
                                     text: "Switch to " + modelData
                                     fontFamily: root.fontFamily
                                 }
@@ -255,6 +264,7 @@ Column {
                                     spacing: Style.space(5)
 
                                     Text {
+                                        textFormat: Text.PlainText
                                         text: "󰐌"
                                         color: isCurrent ? Color.accent : Qt.darker(root.foreground, 1.4)
                                         font.family: root.fontFamily
@@ -264,6 +274,7 @@ Column {
 
                                     Text {
                                         id: playerNameText
+                                        textFormat: Text.PlainText
                                         text: modelData
                                         color: isCurrent ? root.foreground : Qt.darker(root.foreground, 1.3)
                                         font.family: root.fontFamily
@@ -315,6 +326,7 @@ Column {
                     }
 
                     Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: "󰒮"
                         color: root.foreground
@@ -356,6 +368,7 @@ Column {
                     }
 
                     Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: root.isPlaying ? "󰏤" : "󰐊"
                         color: Color.accent
@@ -397,6 +410,7 @@ Column {
                     }
 
                     Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: "󰒭"
                         color: root.foreground
