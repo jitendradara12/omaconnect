@@ -716,7 +716,12 @@ Item {
         return true
     }
 
+    function validDeviceId(id) {
+        return /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(String(id || ""))
+    }
+
     function respondToPairingRequest(id, accept) {
+        if (!validDeviceId(id)) return false
         var device = deviceById(id)
         if (!device || !device.pairRequestedByPeer || pairResponseProcess.running || pairProcess.running) return false
         selectDevice(id)
