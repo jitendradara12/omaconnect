@@ -716,7 +716,12 @@ Item {
         return true
     }
 
+    function validDeviceId(id) {
+        return /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(String(id || ""))
+    }
+
     function respondToPairingRequest(id, accept) {
+        if (!validDeviceId(id)) return false
         var device = deviceById(id)
         if (!device || !device.pairRequestedByPeer || pairResponseProcess.running || pairProcess.running) return false
         selectDevice(id)
@@ -978,15 +983,13 @@ Item {
 
     function configureFirewall() {
         if (firewallProcess.running) return
-        var script = getFirewallScriptPath()
-        firewallProcess.command = ["bash", "-c", "if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then omarchy-launch-floating-terminal-with-presentation \"bash '" + script + "'\"; else xdg-terminal-exec bash '" + script + "'; fi"]
+        firewallProcess.command = ["bash", scriptPath("scripts/launch_in_terminal.sh"), getFirewallScriptPath()]
         firewallProcess.running = true
     }
 
     function installDependencies() {
         if (installProcess.running) return
-        var script = getInstallScriptPath()
-        installProcess.command = ["bash", "-c", "if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then omarchy-launch-floating-terminal-with-presentation \"bash '" + script + "'\"; else xdg-terminal-exec bash '" + script + "'; fi"]
+        installProcess.command = ["bash", scriptPath("scripts/launch_in_terminal.sh"), getInstallScriptPath()]
         installProcess.running = true
     }
 

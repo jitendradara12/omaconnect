@@ -22,9 +22,14 @@ Commands that will be executed:
 ============================================================
 EOF
 
-    if [[ -t 0 ]]; then
-        printf 'Press Enter to apply UFW rules, or Ctrl+C to cancel: '
-        read -r _
+    if [[ ! -t 0 ]]; then
+        echo "Refusing to apply firewall rules without an interactive terminal (stdin is not a TTY)." >&2
+        exit 1
+    fi
+    printf 'Press Enter to apply UFW rules, or Ctrl+C to cancel: '
+    if ! read -r _; then
+        echo "Cancelled." >&2
+        exit 1
     fi
 
     echo "Applying UFW firewall rules with root privileges..."
@@ -52,9 +57,14 @@ Commands that will be executed:
 ============================================================
 EOF
 
-    if [[ -t 0 ]]; then
-        printf 'Press Enter to apply firewalld rules, or Ctrl+C to cancel: '
-        read -r _
+    if [[ ! -t 0 ]]; then
+        echo "Refusing to apply firewall rules without an interactive terminal (stdin is not a TTY)." >&2
+        exit 1
+    fi
+    printf 'Press Enter to apply firewalld rules, or Ctrl+C to cancel: '
+    if ! read -r _; then
+        echo "Cancelled." >&2
+        exit 1
     fi
 
     echo "Applying firewalld rules with root privileges..."

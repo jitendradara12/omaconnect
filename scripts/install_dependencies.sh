@@ -15,9 +15,14 @@ Exact command that will be executed:
 ============================================================
 EOF
 
-if [[ -t 0 ]]; then
-    printf 'Press Enter to proceed with installation, or Ctrl+C to cancel: '
-    read -r _
+if [[ ! -t 0 ]]; then
+    echo "Refusing to install dependencies without an interactive terminal (stdin is not a TTY)." >&2
+    exit 1
+fi
+printf 'Press Enter to proceed with installation, or Ctrl+C to cancel: '
+if ! read -r _; then
+    echo "Cancelled." >&2
+    exit 1
 fi
 
 echo "Running pacman with root privileges..."
