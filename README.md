@@ -87,6 +87,31 @@ omarchy plugin update omaconnect
 ```bash
 omarchy plugin remove omaconnect
 ```
+
+## Development / running tests
+
+Run the full validation pipeline (python unit tests, bash tests, shell syntax, and the optional shellcheck/qmllint stages when those tools are installed):
+
+```bash
+bash scripts/validate.sh
+```
+
+Tests follow two conventions and are discovered automatically, so no list needs updating when tests are added:
+
+- `tests/test_*.py` — python `unittest` tests: `python3 -m unittest discover -s tests -p 'test_*.py' -q`
+- `tests/*.test.sh` — zero-dependency bash tests: `bash tests/<name>.test.sh`
+
+CI (`.github/workflows/ci.yml`) runs `scripts/validate.sh` plus the two commands above directly as a second net. The Quickshell QML runtime cannot run headless (it needs a compositor, the omarchy-shell engine, and a KDE Connect daemon), so CI covers the bash and python tests plus shell syntax, and the QML files get a `qmllint` syntax check only.
+
+## Privileged actions
+
+Two scripts used by the panel's troubleshooting helpers run with `sudo`:
+
+- `scripts/setup_firewall.sh` opens the KDE Connect ports with `ufw` or `firewalld`.
+- `scripts/install_dependencies.sh` installs packages with `pacman`.
+
+Both print the commands they run and need an interactive terminal for the `sudo` password prompt — always run them from a terminal and review the printed commands before confirming. Everything else in the plugin, tests included, runs unprivileged.
+
 ## Star History
 
 <a href="https://www.star-history.com/?repos=jitendradara12%2Fomaconnect&type=date&releases=&legend=bottom-right">
