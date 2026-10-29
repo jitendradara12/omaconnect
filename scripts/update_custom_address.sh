@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Add/remove a KDE Connect custom device address. The list lives in the
+# daemon's customDevices property and is persisted by KDE Connect itself.
+# The current list is read with `busctl --user --json=short get-property`
+# and parsed by discover_report.py (dependency: busctl/systemd + python3
+# instead of gdbus/sed/tr -- the old text extraction could not survive
+# quoting inside values); the write stays a single busctl set-property call
+# in pure argv.
+
 operation=${1:-}
 target=${2:-}
 base=/modules/kdeconnect
@@ -8,17 +16,16 @@ base=/modules/kdeconnect
 [[ "$operation" == add || "$operation" == remove ]] || exit 64
 [[ -n "$target" && "$target" != -* && "$target" != *$'\t'* && "$target" != *$'\n'* && "$target" != *' '* && "$target" != */* ]] || exit 64
 
-for dependency in gdbus busctl sed tr; do
+for dependency in busctl python3; do
     command -v "$dependency" >/dev/null 2>&1 || exit 127
 done
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+report="$script_dir/discover_report.py"
 
-raw=$(gdbus call --session --dest org.kde.kdeconnect \
-    --object-path "$base" --method org.freedesktop.DBus.Properties.Get \
+raw=$(busctl --user --json=short get-property org.kde.kdeconnect "$base" \
     org.kde.kdeconnect.daemon customDevices 2>/dev/null) || exit 69
 
-entries=$(printf '%s' "$raw" | sed -E 's/.*\[//; s/\].*//' | tr ',' '\n' \
-    | sed -nE "s/^[[:space:]]*['\"]?([^'\"]+)['\"]?[[:space:]]*$/\1/p")
-[[ -n "$entries" || "$raw" =~ \[[[:space:]]*\] ]] || exit 70
+entries=$(printf '%s' "$raw" | python3 "$report" addresses) || exit 70
 
 addresses=()
 found=false

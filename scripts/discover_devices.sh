@@ -1,28 +1,58 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Keep the QML process boundary stable: one tab-separated record per device,
-# and a non-zero exit for missing dependencies, D-Bus errors, or bad replies.
+# Device discovery over the KDE Connect daemon D-Bus interface.
+#
+# Transport is `busctl --user --json=short` (systemd), parsed by
+# discover_report.py. The previous gdbus text output went through a
+# 6-substitution sed chain that broke on apostrophes, angle-bracket type
+# wrappers and multiline values; structured JSON cannot be forged by hostile
+# device names. Dependency change: busctl (systemd) + python3 instead of
+# gdbus (omarchy-connect already requires busctl; python3 was already
+# required for the media status path).
+#
+# Frozen stdout contract consumed by KdeConnectController.qml parseScanLine:
+#   CUSTOM_ADDRESSES_READY or CUSTOM_ADDRESSES_UNAVAILABLE
+#   CUSTOM_ADDRESS<TAB><addr>              (one per saved custom address)
+#   DEVICE<TAB> + 13 more tab-separated fields:
+#       id name type paired reachable charge charging plugins netType
+#       netStrength pairRequested pairRequestedByPeer verificationKey
+# Each device is read with ONE org.freedesktop.DBus.Properties GetAll call
+# on interface org.kde.kdeconnect.device (name, type, isPaired, isReachable,
+# isPairRequested, isPairRequestedByPeer, supportedPlugins, verificationKey)
+# instead of one call per property, plus best-effort GetAll calls on the
+# battery / connectivity_report sub-objects. Tabs/newlines in remote values
+# are folded to spaces (anti-spoofing of the TSV record).
+#
+# Exit codes: 127 missing dependencies, 69 daemon down / D-Bus error,
+# 70 malformed reply, 64 bad usage.
 base=/modules/kdeconnect
 
-for command in gdbus sed grep tr; do
+for command in busctl python3; do
     command -v "$command" >/dev/null 2>&1 || exit 127
 done
 
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+report="$script_dir/discover_report.py"
+
 # kdeconnect-cli is optional: daemon discovery works without it; --refresh is best-effort.
 
+busctl_json() {
+    # Structured JSON only; any D-Bus failure maps onto the 69 protocol.
+    busctl --user --json=short "$@" 2>/dev/null || return 69
+}
+
 is_daemon_running() {
-    gdbus call --session --dest org.freedesktop.DBus \
-        --object-path /org/freedesktop/DBus \
-        --method org.freedesktop.DBus.NameHasOwner org.kde.kdeconnect 2>/dev/null \
-        | grep -q '(true,)'
+    local reply
+    reply=$(busctl_json call org.freedesktop.DBus /org/freedesktop/DBus \
+        org.freedesktop.DBus NameHasOwner s org.kde.kdeconnect) || return 1
+    printf '%s' "$reply" | python3 "$report" truthy
 }
 
 ensure_daemon() {
     if ! is_daemon_running; then
-        gdbus call --session --dest org.freedesktop.DBus \
-            --object-path /org/freedesktop/DBus \
-            --method org.freedesktop.DBus.StartServiceByName org.kde.kdeconnect 0 >/dev/null 2>&1 || true
+        busctl --user call org.freedesktop.DBus /org/freedesktop/DBus \
+            org.freedesktop.DBus StartServiceByName su org.kde.kdeconnect 0 >/dev/null 2>&1 || true
         sleep 0.5
     fi
 }
@@ -32,20 +62,12 @@ if [[ "${1:-}" == "--refresh" || "${1:-}" == "-r" ]]; then
     if command -v kdeconnect-cli >/dev/null 2>&1; then
         kdeconnect-cli --refresh >/dev/null 2>&1 || true
     fi
-    gdbus call --session --dest org.kde.kdeconnect \
-        --object-path /modules/kdeconnect \
-        --method org.kde.kdeconnect.daemon.forceOnNetworkChange >/dev/null 2>&1 || true
+    busctl --user call org.kde.kdeconnect "$base" \
+        org.kde.kdeconnect.daemon forceOnNetworkChange >/dev/null 2>&1 || true
     sleep 1.2
 fi
 
 is_daemon_running || exit 69
-
-property() {
-    local path=$1 interface=$2 name=$3
-    gdbus call --session --dest org.kde.kdeconnect \
-        --object-path "$path" --method org.freedesktop.DBus.Properties.Get \
-        "$interface" "$name" 2>/dev/null || return 69
-}
 
 sanitize_field() {
     local field=$1
@@ -54,23 +76,16 @@ sanitize_field() {
     printf '%s' "$field"
 }
 
-value() {
-    # gdbus quotes strings as <'value'> and scalar values as <value>.
-    printf '%s' "$1" | sed -E "s/^\((true|false),\)$/\1/; s/^\(<[[:space:]]*'(.*)',[[:space:]]*>,\)$/\1/; s/^\(<('([^']|\\\\')*'|[^>]+)>.*$/\1/; s/^<'(.*)'>,?$/\1/; s/^<([^>]*)>,?$/\1/; s/^'(.*)'$/\1/; s/^'(.*)',$/\1/"
-}
-
-ids=$(gdbus call --session --dest org.kde.kdeconnect --object-path "$base" \
-    --method org.kde.kdeconnect.daemon.devices false false) || exit 69
-entries=$(printf '%s' "$ids" | sed -E 's/.*\[//; s/\].*//' | tr ',' '\n' \
-    | sed -nE "s/^[[:space:]]*['\"]?([^'\"]+)['\"]?[[:space:]]*$/\1/p")
-[[ -n "$entries" || "$ids" =~ ^\((@as[[:space:]]+)?\[[[:space:]]*\],[[:space:]]*\)$ ]] || exit 70
+ids_raw=$(busctl_json call org.kde.kdeconnect "$base" \
+    org.kde.kdeconnect.daemon devices bb false false) || exit 69
+entries=$(printf '%s' "$ids_raw" | python3 "$report" ids) || exit 70
 
 # KDE Connect owns this list and persists it. Exposing it in the same snapshot
 # lets the UI add Tailscale or other VPN addresses without a second database.
-if custom_raw=$(property "$base" org.kde.kdeconnect.daemon customDevices 2>/dev/null); then
+if custom_raw=$(busctl_json get-property org.kde.kdeconnect "$base" \
+    org.kde.kdeconnect.daemon customDevices); then
     printf 'CUSTOM_ADDRESSES_READY\n'
-    custom_entries=$(printf '%s' "$custom_raw" | sed -E 's/.*\[//; s/\].*//' | tr ',' '\n' \
-        | sed -nE "s/^[[:space:]]*['\"]?([^'\"]+)['\"]?[[:space:]]*$/\1/p")
+    custom_entries=$(printf '%s' "$custom_raw" | python3 "$report" addresses) || custom_entries=""
     while IFS= read -r address; do
         [[ -n "$address" ]] || continue
         printf 'CUSTOM_ADDRESS\t%s\n' "$(sanitize_field "$address")"
@@ -84,42 +99,12 @@ while IFS= read -r entry; do
     path="$entry"
     [[ "$path" == /* ]] || path="$base/devices/$entry"
     id=${path##*/}
-    name=$(value "$(property "$path" org.kde.kdeconnect.device name)") || continue
-    type=$(value "$(property "$path" org.kde.kdeconnect.device type)") || continue
-    paired=$(value "$(property "$path" org.kde.kdeconnect.device isPaired)") || continue
-    reachable=$(value "$(property "$path" org.kde.kdeconnect.device isReachable)") || continue
-    pair_requested=$(value "$(property "$path" org.kde.kdeconnect.device isPairRequested 2>/dev/null)") || pair_requested=false
-    pair_requested_by_peer=$(value "$(property "$path" org.kde.kdeconnect.device isPairRequestedByPeer 2>/dev/null)") || pair_requested_by_peer=false
-    verification_key=$(value "$(property "$path" org.kde.kdeconnect.device verificationKey 2>/dev/null)") || verification_key=""
-    [[ "$pair_requested" == true ]] || pair_requested=false
-    [[ "$pair_requested_by_peer" == true ]] || pair_requested_by_peer=false
-
-    supported=$(property "$path" org.kde.kdeconnect.device supportedPlugins) || continue
-    plugins=
-    for plugin in kdeconnect_battery kdeconnect_ping kdeconnect_share kdeconnect_runcommand kdeconnect_findmyphone kdeconnect_clipboard kdeconnect_connectivity_report kdeconnect_sms kdeconnect_mprisremote kdeconnect_mpriscontrol kdeconnect_mpris; do
-        if [[ "$supported" == *"'$plugin'"* || "$supported" == *"<$plugin>"* ]]; then
-            plugins="${plugins:+$plugins,}$plugin"
-        fi
-    done
-
-    charge=-1
-    charging=false
-    if [[ "$plugins" == *kdeconnect_battery* ]]; then
-        battery="$path/battery"
-        charge_raw=$(value "$(property "$battery" org.kde.kdeconnect.device.battery charge)") || charge_raw=""
-        [[ "$charge_raw" =~ ^[0-9]+$ ]] && charge=$charge_raw
-        charging_raw=$(value "$(property "$battery" org.kde.kdeconnect.device.battery isCharging)") || charging_raw=false
-        [[ "$charging_raw" == true ]] && charging=true
-    fi
-    net_type=
-    net_strength=-1
-    if [[ "$plugins" == *kdeconnect_connectivity_report* ]]; then
-        conn="$path/connectivity_report"
-        type_raw=$(value "$(property "$conn" org.kde.kdeconnect.device.connectivity_report cellularNetworkType)") || type_raw=""
-        strength_raw=$(value "$(property "$conn" org.kde.kdeconnect.device.connectivity_report cellularNetworkStrength)") || strength_raw=""
-        [[ -n "$type_raw" && "$type_raw" != "null" ]] && net_type=$type_raw
-        [[ "$strength_raw" =~ ^[0-9]+$ ]] && net_strength=$strength_raw
-    fi
-    printf 'DEVICE\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$(sanitize_field "$id")" "$(sanitize_field "$name")" "$(sanitize_field "$type")" "$paired" "$reachable" "$charge" "$charging" "$plugins" "$(sanitize_field "$net_type")" "$net_strength" "$pair_requested" "$pair_requested_by_peer" "$(sanitize_field "$verification_key")"
+    device_json=$(busctl_json call org.kde.kdeconnect "$path" \
+        org.freedesktop.DBus.Properties GetAll s org.kde.kdeconnect.device) || continue
+    # Sub-objects only exist while their plugin is loaded; failure means n/a.
+    battery_json=$(busctl_json call org.kde.kdeconnect "$path/battery" \
+        org.freedesktop.DBus.Properties GetAll s org.kde.kdeconnect.device.battery) || battery_json=""
+    conn_json=$(busctl_json call org.kde.kdeconnect "$path/connectivity_report" \
+        org.freedesktop.DBus.Properties GetAll s org.kde.kdeconnect.device.connectivity_report) || conn_json=""
+    python3 "$report" device "$id" "$device_json" "$battery_json" "$conn_json" || continue
 done <<< "$entries"
