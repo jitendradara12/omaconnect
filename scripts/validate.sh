@@ -127,12 +127,16 @@ elif [ -x /usr/lib/qt6/bin/qmllint ]; then
     qmllint_cmd=/usr/lib/qt6/bin/qmllint
 fi
 
+# Import paths for the Omarchy shell (qs.Ui / qs.Commons / Quickshell types).
+# OMARCHY_SHELL_PATH lets CI point at a checkout of omacom/omarchy without
+# claiming OMARCHY_PATH (which would also arm the plugin-validator stage).
+omarchy_shell="${OMARCHY_SHELL_PATH:-${OMARCHY_PATH:-/usr/share/omarchy}/shell}"
+
 if [ -n "$qmllint_cmd" ]; then
     printf '%s\n' "[6/${total_stages}] running $qmllint_cmd"
     qml_output="$(mktemp)"
     trap 'rm -f "$qml_output"' EXIT
     set +e
-    omarchy_shell="${OMARCHY_PATH:-/usr/share/omarchy}/shell"
     if [ ! -d "$omarchy_shell" ]; then
         printf '%s\n' "note: $omarchy_shell not found; linting without Omarchy imports may add warnings"
     fi
@@ -149,9 +153,16 @@ if [ -n "$qmllint_cmd" ]; then
         "${qml_files[@]}" >"$qml_output" 2>&1
     status=$?
     set -e
-    if [ "$status" -ne 0 ]; then
-        printf '%s\n' "[6/${total_stages}] FAIL qmllint reported actual errors; runtime loader checks are also required"
-        printf '%s\n' "$(<"$qml_output")"
+    # Verdict comes from the findings, not the exit code: some distro builds
+    # of qmllint (Debian/Ubuntu Qt 6.4) exit non-zero when only warnings were
+    # reported, while others exit 0 for the same output. A line starting with
+    # "Error:" is a real syntax/type failure and always fails the stage;
+    # warning-only output passes (informational, never claimed warning-free).
+    error_count="$(grep -c '^Error:' "$qml_output" || true)"
+    if [ "${error_count:-0}" -gt 0 ]; then
+        printf '%s\n' "[6/${total_stages}] FAIL qmllint reported $error_count error(s); runtime loader checks are also required"
+        grep '^Error:' "$qml_output" | head -20
+        cat "$qml_output" >&2
         failed_stages+=(6)
     elif grep -q 'Warning:' "$qml_output"; then
         printf '%s\n' "[6/${total_stages}] PASS qmllint emitted host-import/unqualified-type diagnostics; not claimed warning-free"
