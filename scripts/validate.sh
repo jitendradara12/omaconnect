@@ -155,16 +155,35 @@ if [ -n "$qmllint_cmd" ]; then
     # Verdict comes from the findings, not the exit code: some distro builds
     # of qmllint (Debian/Ubuntu Qt 6.4) exit non-zero when only warnings were
     # reported, while others exit 0 for the same output. A line starting with
-    # "Error:" is a real syntax/type failure and always fails the stage;
-    # warning-only output passes (informational, never claimed warning-free).
-    # One guard on the exit code: non-zero with NO diagnostics means the
-    # linter itself failed (crash, bad invocation) — that must never pass.
+    # "Error:" is a real syntax/type failure and always fails the stage. Qt 6
+    # qmllint also reports syntax errors as "Warning: ... [syntax]" (exit
+    # 255) — the [syntax] tag marks genuine parse failures, so it is enforced
+    # like an error. Plain warning-only output passes (informational, never
+    # claimed warning-free). Two guards on the exit code: non-zero with NO
+    # diagnostics means the linter itself crashed, and non-zero with output
+    # that carries neither an Error/[syntax] finding nor any Warning line is
+    # an unrecognized linter failure — neither may ever pass.
+    # The [syntax] tag is matched as a standalone token (start/end of line or
+    # whitespace around it): Qt prints it as a trailing bracketed tag, and a
+    # bare substring match would false-fail warning text that merely contains
+    # "[syntax]" inside an identifier (e.g. "Foo[syntax]Helper"). The third
+    # alternative covers the Qt 6.4-era output format (the exact build
+    # ubuntu-24.04 + qt6-declarative-dev-tools installs in CI), which reports
+    # parse errors as bare location lines "file.qml:4:1: Expected token ...":
+    # no severity prefix and no [syntax] tag. Warning:/Info: lines and the
+    # tab-indented continuation lines never match (colon after the first
+    # word is followed by a space, and continuations start with whitespace).
+    qml_error_re='(^Error:|(^|[[:space:]])\[syntax\]($|[[:space:]])|^[^[:space:]][^:]*:[0-9]+:[0-9]+:)'
     if [ "$status" -ne 0 ] && [ ! -s "$qml_output" ]; then
         printf '%s\n' "[6/${total_stages}] FAIL qmllint exited $status with no output (linter failure?)"
         failed_stages+=(6)
-    elif grep -q '^Error:' "$qml_output"; then
-        error_count="$(grep -c '^Error:' "$qml_output" || true)"
-        printf '%s\n' "[6/${total_stages}] FAIL qmllint reported $error_count error(s); runtime loader checks are also required"
+    elif grep -q -E "$qml_error_re" "$qml_output"; then
+        error_count="$(grep -c -E "$qml_error_re" "$qml_output" || true)"
+        printf '%s\n' "[6/${total_stages}] FAIL qmllint reported $error_count syntax/linter error(s); runtime loader checks are also required"
+        sed -n '1,40p' "$qml_output" >&2 || true
+        failed_stages+=(6)
+    elif [ "$status" -ne 0 ] && ! grep -q 'Warning:' "$qml_output"; then
+        printf '%s\n' "[6/${total_stages}] FAIL qmllint exited $status: $(awk 'NF { print; exit }' "$qml_output" | LC_ALL=C tr -d '\000-\037')"
         sed -n '1,40p' "$qml_output" >&2 || true
         failed_stages+=(6)
     elif grep -q 'Warning:' "$qml_output"; then
