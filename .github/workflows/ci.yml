@@ -20,6 +20,10 @@ name: CI
 
 on: [push, pull_request]
 
+# Least-privilege token access for every job unless a job narrows it further.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
