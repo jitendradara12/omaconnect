@@ -5,10 +5,22 @@ Control phones and connected devices from the Omarchy bar using KDE Connect.
 ![OmaConnect panel](preview.png)
 
 ## Install
-Just install the plugin with this command. It will handle dependencies and firewall in GUI.
+
+Install the required native KDE Connect backend first.
+
 ```bash
-omarchy plugin add https://github.com/jitendradara12/omaconnect.git --enable --yes
+sudo pacman -S --needed kdeconnect glib2 dbus python systemd
 ```
+
+Then install and enable the plugin:
+
+```bash
+omarchy plugin add https://github.com/jitendradara12/omaconnect.git --enable
+```
+
+After installation, click **Start Service** or **Refresh**.
+Install KDE Connect on your phone or other devices as well, then pair it with this computer.
+Firewall changes are a separate action under **Allow in Firewall** when needed.
 
 ## Features
 
@@ -26,23 +38,23 @@ omarchy plugin add https://github.com/jitendradara12/omaconnect.git --enable --y
 
 Configure OmaConnect in Omarchy bar widget settings.
 
-| Setting | Default | Description |
-|---|---|---|
-| `showBatteryStats` | `true` | Battery percentage and charging state |
-| `showBarBattery` | `false` | Battery percentage next to the icon in the bar |
-| `showNetworkStats` | `true` | Cellular network type and signal strength |
-| `showTailscale` | `true` | Tailscale and custom IP discovery |
-| `showDeviceTypeIcons` | `true` | Device type icons in bar and panel |
-| `showMediaPlayer` | `true` | Media player controls and track metadata |
-| `showRemoteCommands` | `true` | Remote commands section |
-| `showTroubleshooting` | `true` | Setup and firewall helpers when offline |
-| `showActionRing` | `true` | Ring device button |
-| `showActionClipboard` | `true` | Clipboard sync button |
-| `showActionFile` | `true` | File transfer button |
-| `showActionSms` | `true` | SMS launcher button |
-| `showActionPing` | `false` | Ping button |
-| `showActionText` | `true` | Text and link share button |
-| `defaultPingMessage` | `""` | Default ping message draft |
+| Setting               | Default | Description                                    |
+| --------------------- | ------- | ---------------------------------------------- |
+| `showBatteryStats`    | `true`  | Battery percentage and charging state          |
+| `showBarBattery`      | `false` | Battery percentage next to the icon in the bar |
+| `showNetworkStats`    | `true`  | Cellular network type and signal strength      |
+| `showTailscale`       | `true`  | Tailscale and custom IP discovery              |
+| `showDeviceTypeIcons` | `true`  | Device type icons in bar and panel             |
+| `showMediaPlayer`     | `true`  | Media player controls and track metadata       |
+| `showRemoteCommands`  | `true`  | Remote commands section                        |
+| `showTroubleshooting` | `true`  | Setup and firewall helpers when offline        |
+| `showActionRing`      | `true`  | Ring device button                             |
+| `showActionClipboard` | `true`  | Clipboard sync button                          |
+| `showActionFile`      | `true`  | File transfer button                           |
+| `showActionSms`       | `true`  | SMS launcher button                            |
+| `showActionPing`      | `false` | Ping button                                    |
+| `showActionText`      | `true`  | Text and link share button                     |
+| `defaultPingMessage`  | `""`    | Default ping message draft                     |
 
 ## Shortcuts
 
@@ -54,10 +66,10 @@ o.bind("SUPER + SHIFT + C", "Toggle OmaConnect", "omarchy-shell shell toggle oma
 
 ## Dependencies
 
-Requires `kdeconnect`, `glib2`, `dbus`, and `omarchy-menu-select` (for file sharing). `tailscale` and `kdeconnect-sms` are optional.
+Requires `kdeconnect`, `glib2`, `dbus`, `python` (Python 3), `systemd` (for `busctl`), and `omarchy-menu-select` (for file sharing). `tailscale` and `kdeconnect-sms` are optional.
 
 ```bash
-sudo pacman -S --needed kdeconnect glib2 dbus
+sudo pacman -S --needed kdeconnect glib2 dbus python systemd
 ```
 
 ### Tailscale and custom IPs

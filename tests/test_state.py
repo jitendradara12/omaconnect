@@ -1807,6 +1807,40 @@ class ScriptIntegrationTests(unittest.TestCase):
           "customDevices", "as", "0"])
       assert_busctl_argv_clean(self, read_busctl_calls(log_path))
 
+  def test_discovery_distinguishes_missing_backend_from_stopped_daemon(self):
+    script = ROOT / "scripts" / "discover_devices.sh"
+    for names, expected in [
+        ([], 127), (["org.kde.kdeconnect"], 69),
+        (["org.kde.kdeconnect.other"], 127),
+        (None, 69), ("malformed", 70),
+    ]:
+      with self.subTest(names=names), tempfile.TemporaryDirectory() as tmp:
+        stub_dir = Path(tmp)
+        reply = json.dumps({"type": "as", "data": [names]}) if isinstance(names, list) else names
+        write_busctl_stub(stub_dir, [
+            ("*NameHasOwner*", FIXTURES / "busctl-namehasowner-false.json"),
+            ("*ListActivatableNames*", reply),
+        ])
+        result = subprocess.run(
+            [BASH, str(script)], capture_output=True,
+            env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+        )
+        self.assertEqual(result.returncode, expected, result.stderr)
+        self.assertEqual(result.stdout, b"")
+
+    # An inaccessible session bus must not be reported as a missing backend.
+    with tempfile.TemporaryDirectory() as tmp:
+      stub_dir = Path(tmp)
+      write_busctl_stub(stub_dir, [
+          ("*NameHasOwner*", None),
+          ("*ListActivatableNames*", '{"type":"as","data":[[]]}'),
+      ])
+      result = subprocess.run(
+          [BASH, str(script)], capture_output=True,
+          env={**os.environ, "PATH": f"{stub_dir}:{os.environ['PATH']}"},
+      )
+      self.assertEqual(result.returncode, 69, result.stderr)
+
   def test_discover_devices_end_to_end(self):
     script = ROOT / "scripts" / "discover_devices.sh"
 

@@ -9,9 +9,11 @@ OmaConnect requires the following official Arch Linux packages:
   - kdeconnect : Core daemon, D-Bus interfaces, and CLI tools
   - glib2      : gdbus utility for desktop D-Bus communication
   - dbus       : Desktop message bus
+  - python     : Python 3 for structured D-Bus reply parsing
+  - systemd    : busctl utility for desktop D-Bus communication
 
 Exact command that will be executed:
-  sudo pacman -S --needed kdeconnect glib2 dbus
+  sudo pacman -S --needed kdeconnect glib2 dbus python systemd
 ============================================================
 EOF
 
@@ -26,7 +28,7 @@ if ! read -r _; then
 fi
 
 echo "Running pacman with root privileges..."
-if sudo pacman -S --needed kdeconnect glib2 dbus; then
+if sudo pacman -S --needed kdeconnect glib2 dbus python systemd; then
     echo ""
     echo "Dependencies installed successfully."
     sleep 1.5

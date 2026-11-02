@@ -232,7 +232,7 @@ assert_line "sudo log has exact firewalld reload argv" "$log" "firewall-cmd --re
 log="$WORK/sudo-g.log"; : > "$log"
 CHILD_PATH="$FAKE_DEP:$COREBIN" SUDO_LOG="$log" pty_run "$HEX_PROMPT" "$HEX_LF" "$BASH_BIN" "$DEP"
 assert_rc_eq "install_dependencies.sh exits 0 after Enter on a pty" "$PTY_RC" 0
-assert_line "sudo log has exact pacman argv" "$log" "pacman -S --needed kdeconnect glib2 dbus"
+assert_line "sudo log has exact pacman argv" "$log" "pacman -S --needed kdeconnect glib2 dbus python systemd"
 assert_contains "pty output shows pacman banner" "$PTY_OUT" "Running pacman with root privileges..."
 
 # ===========================================================================

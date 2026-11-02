@@ -503,7 +503,7 @@ Column {
 
             Button {
                 text: "Install Dependencies"
-                tooltipText: "Runs: sudo pacman -S --needed kdeconnect glib2 dbus"
+                tooltipText: "Runs: sudo pacman -S --needed kdeconnect glib2 dbus python systemd"
                 foreground: root.foreground
                 fontFamily: root.fontFamily
                 fontSize: Style.font.bodySmall

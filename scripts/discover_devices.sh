@@ -24,7 +24,7 @@ set -Eeuo pipefail
 # battery / connectivity_report sub-objects. Tabs/newlines in remote values
 # are folded to spaces (anti-spoofing of the TSV record).
 #
-# Exit codes: 127 missing dependencies, 69 daemon down / D-Bus error,
+# Exit codes: 127 missing dependencies or unregistered backend, 69 daemon down / D-Bus error,
 # 70 malformed reply, 64 bad usage.
 base=/modules/kdeconnect
 
@@ -45,7 +45,7 @@ busctl_json() {
 is_daemon_running() {
     local reply
     reply=$(busctl_json call org.freedesktop.DBus /org/freedesktop/DBus \
-        org.freedesktop.DBus NameHasOwner s org.kde.kdeconnect) || return 1
+        org.freedesktop.DBus NameHasOwner s org.kde.kdeconnect) || return 69
     printf '%s' "$reply" | python3 "$report" truthy
 }
 
@@ -67,7 +67,19 @@ if [[ "${1:-}" == "--refresh" || "${1:-}" == "-r" ]]; then
     sleep 1.2
 fi
 
-is_daemon_running || exit 69
+if is_daemon_running; then
+    :
+else
+    status=$?
+    [[ "$status" -eq 69 ]] && exit 69
+    # A stopped but installed backend is D-Bus activatable. Check the bus
+    # registry rather than requiring the optional kdeconnect-cli on PATH.
+    activatable_raw=$(busctl_json call org.freedesktop.DBus /org/freedesktop/DBus \
+        org.freedesktop.DBus ListActivatableNames) || exit 69
+    activatable=$(printf '%s' "$activatable_raw" | python3 "$report" ids) || exit 70
+    [[ $'\n'"$activatable"$'\n' == *$'\norg.kde.kdeconnect\n'* ]] || exit 127
+    exit 69
+fi
 
 sanitize_field() {
     local field=$1
